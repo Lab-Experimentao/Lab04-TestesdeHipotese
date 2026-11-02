@@ -24,8 +24,17 @@ from src.config import (
     get_rng,
 )
 from src.descritiva import ARQUIVO_AMOSTRA, carregar_amostra, descritiva
-from src.graficos import fmt, g1_real_simulado
+from src.graficos import fmt, g1_real_simulado, g2_estatistica_h0
 from src.simulacao import calibrar, gerar_conjunto
+from src.testes import (
+    EFEITO_EXEMPLO,
+    N_EXEMPLO,
+    SITUACAO_EXEMPLO,
+    aplicar_testes,
+    conjunto_exemplo,
+    estatisticas_sob_h0,
+    referencias_h0,
+)
 
 CSS_PATH = Path(__file__).parent / "assets" / "style.css"
 ELEGIVEIS_PATH = Path(__file__).parent / "data" / "raw" / "prs_elegiveis.csv"
@@ -146,6 +155,15 @@ def _dados_simulados(versao: float, n: int) -> tuple[pd.DataFrame, pd.DataFrame,
 def dados_simulados(n: int) -> tuple[pd.DataFrame, pd.DataFrame, pd.Series]:
     # Com efeito zero, as diferenças entre os dois grupos simulados são puro acaso
     return _dados_simulados(ELEGIVEIS_PATH.stat().st_mtime, n)
+
+
+@st.cache_data
+def _simulacao_h0(versao: float) -> dict[str, pd.DataFrame]:  # noqa: ARG001
+    return estatisticas_sob_h0(N_EXEMPLO, SITUACAO_EXEMPLO, N_SIMULACOES, get_rng())
+
+
+def simulacao_h0() -> dict[str, pd.DataFrame]:
+    return _simulacao_h0(ELEGIVEIS_PATH.stat().st_mtime)
 
 
 def conteudo_cenario() -> None:
@@ -325,10 +343,96 @@ def conteudo_dados() -> None:
     )
 
 
+def conteudo_testes() -> None:
+    welch = TESTE_PARAMETRICO
+    mw = TESTE_NAO_PARAMETRICO
+    sem_bot, com_bot = conjunto_exemplo()
+    exemplo = aplicar_testes(sem_bot, com_bot)
+    referencias = referencias_h0(sem_bot, com_bot)
+    simulacoes = simulacao_h0()
+    rejeicoes = {t: 100 * (s["p_valor"] < ALPHA).mean() for t, s in simulacoes.items()}
+    t_critico = referencias[welch].limites_criticos[1]
+    u_menor, u_maior = referencias[mw].limites_criticos
+    multiplicador = np.exp(EFEITO_EXEMPLO * calibrar().sigma)
+
+    with st.container(key="grafico-g2"):
+        st.plotly_chart(
+            g2_estatistica_h0(exemplo, referencias, simulacoes, ALPHA),
+            theme=None,
+            config={"displayModeBar": False},
+        )
+
+    st.markdown(
+        f"""
+        <dl class="facts">
+          <dt>O que cada teste compara</dt>
+          <dd>O <b>{welch}</b> compara as médias dos grupos, em erros-padrão; o <b>{mw}</b> compara
+          os postos: o U conta em quantos dos {fmt(N_EXEMPLO ** 2, 0)} pares (com bot, sem bot) o PR
+          com bot demorou mais, e cada empate vale meio.</dd>
+          <dt>Região de rejeição</dt>
+          <dd>Como o teste é bicaudal, α = {fmt(100 * ALPHA, 0)}% se divide entre as duas pontas da
+          curva, onde ficam os valores que seriam raros se H₀ fosse verdadeira: |t| &gt;
+          {fmt(t_critico, 2)} e U fora de {fmt(u_menor, 0)} a {fmt(u_maior, 0)}.</dd>
+          <dt>P-valor do exemplo</dt>
+          <dd>No exemplo, com {N_EXEMPLO} PRs por grupo e tempos com bot {fmt(multiplicador, 1)} vezes
+          maiores, a área hachurada é a chance de um resultado tão ou mais extremo se H₀ fosse
+          verdadeira, e não a probabilidade de H₀ ser verdadeira:
+          {fmt(100 * exemplo.loc[welch, "p_valor"], 1)}% no {welch}, que não rejeita H₀ e comete um
+          erro tipo II, e {fmt(100 * exemplo.loc[mw, "p_valor"], 1)}% no {mw}, que rejeita.</dd>
+          <dt>Curva × simulação</dt>
+          <dd>As barras mostram {fmt(N_SIMULACOES, 0)} conjuntos sem efeito: o U acompanha a curva,
+          mas o t forma dois picos perto de ±1, porque o PR mais lento domina a média e a variância
+          do próprio grupo, e só {fmt(rejeicoes[welch], 1)}% dos conjuntos rejeitam H₀ no {welch},
+          contra {fmt(rejeicoes[mw], 1)}% no {mw}.</dd>
+        </dl>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    distribuicao_welch = referencias[welch].distribuicao
+    linhas = {
+        "Estatística no exemplo": (
+            f"t = {fmt(exemplo.loc[welch, 'estatistica'], 2)}",
+            f"U = {fmt(exemplo.loc[mw, 'estatistica'], 1)}",
+        ),
+        "Curva sob H₀": (
+            f"t de Student, {fmt(distribuicao_welch.args[0], 1)} gl",
+            f"Normal, média {fmt(referencias[mw].centro, 0)}, desvio {fmt(referencias[mw].distribuicao.std(), 1)}",
+        ),
+        "Região de rejeição": (
+            f"|t| &gt; {fmt(t_critico, 2)}",
+            f"U &lt; {fmt(u_menor, 0)} ou U &gt; {fmt(u_maior, 0)}",
+        ),
+        "P-valor": tuple(fmt(exemplo.loc[t, "p_valor"], 3) for t in (welch, mw)),
+        f"Decisão a α = {fmt(ALPHA, 2)}": tuple(
+            "Rejeita H₀" if exemplo.loc[t, "rejeita_h0"] else "Não rejeita H₀" for t in (welch, mw)
+        ),
+        "Tamanho do efeito": tuple(
+            f"{exemplo.loc[t, 'medida_efeito']} = {fmt(exemplo.loc[t, 'efeito'], 2)}" for t in (welch, mw)
+        ),
+        "Rejeições sob H₀ (simulação)": tuple(f"{fmt(rejeicoes[t], 1)}%" for t in (welch, mw)),
+    }
+    corpo = "".join(
+        f"<tr><th>{rotulo}</th><td>{a}</td><td>{b}</td></tr>" for rotulo, (a, b) in linhas.items()
+    )
+    st.markdown(
+        f"""
+        <div class="table-scroll">
+          <table class="stats-table">
+            <thead><tr><th>Conjunto de exemplo</th><th>{welch}</th><th>{mw}</th></tr></thead>
+            <tbody>{corpo}</tbody>
+          </table>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 # Seções já escritas; as demais mostram o aviso de pendente
 CONTEUDOS = {
     "cenario": conteudo_cenario,
     "dados": conteudo_dados,
+    "testes": conteudo_testes,
 }
 
 

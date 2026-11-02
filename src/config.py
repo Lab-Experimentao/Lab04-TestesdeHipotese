@@ -38,7 +38,7 @@ CORES_TESTES = {
 # Cores auxiliares
 COR_REAL = "#52525B"          # dados reais (G1)
 COR_SIMULADO = "#A1A1AA"      # dados simulados (G1)
-COR_REJEICAO = "#DC2626"      # região de rejeição (G2)
+COR_REJEICAO = "#BE185D"      # região de rejeição (G2); um vermelho se confundiria com o laranja do Mann-Whitney
 COR_REFERENCIA = "#111113"    # linha de 5% (G3)
 
 

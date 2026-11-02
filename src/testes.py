@@ -6,6 +6,8 @@ efeito positivo indica valores maiores no segundo grupo.
 Execute com: python -m src.testes
 """
 
+from dataclasses import dataclass
+
 import numpy as np
 import pandas as pd
 from scipy import stats
@@ -25,6 +27,27 @@ ARQUIVO_EXEMPLO = PROCESSED_DATA_DIR / "exemplo_simulado.csv"
 N_EXEMPLO = 30
 EFEITO_EXEMPLO = 0.5
 SITUACAO_EXEMPLO = "mistura"
+
+
+@dataclass(frozen=True)
+class ReferenciaH0:
+    """Distribuição em que o teste se baseia sob H₀.
+
+    As duas caudas além de centro ± distancia_critica somam α, e além de centro ± distancia_p
+    somam o p-valor. correcao é o que a estatística observada ainda precisa superar além da
+    distância crítica para rejeitar H₀ (correção de continuidade do Mann-Whitney).
+    """
+
+    distribuicao: stats.distributions.rv_frozen
+    centro: float
+    distancia_critica: float
+    distancia_p: float
+    correcao: float = 0.0
+
+    @property
+    def limites_criticos(self) -> tuple[float, float]:
+        distancia = self.distancia_critica + self.correcao
+        return self.centro - distancia, self.centro + distancia
 
 
 def hedges_g(a: np.ndarray, b: np.ndarray) -> float:
@@ -64,6 +87,59 @@ def aplicar_testes(a: np.ndarray, b: np.ndarray, alpha: float = ALPHA) -> pd.Dat
     return resultados.set_index("teste")
 
 
+def referencia_welch(a: np.ndarray, b: np.ndarray, alpha: float = ALPHA) -> ReferenciaH0:
+    r = stats.ttest_ind(b, a, equal_var=False, alternative="two-sided")
+    distribuicao = stats.t(r.df)
+    return ReferenciaH0(distribuicao, 0.0, float(distribuicao.ppf(1 - alpha / 2)), abs(float(r.statistic)))
+
+
+def referencia_mann_whitney(a: np.ndarray, b: np.ndarray, alpha: float = ALPHA) -> ReferenciaH0:
+    """Normal que o SciPy usa neste tamanho de amostra, com as correções de empates e de continuidade."""
+    n_a, n_b = len(a), len(b)
+    n = n_a + n_b
+    _, empates = np.unique(np.concatenate([a, b]), return_counts=True)
+    variancia = n_a * n_b / 12 * (n + 1 - (empates**3 - empates).sum() / (n * (n - 1)))
+    centro = n_a * n_b / 2
+    distribuicao = stats.norm(centro, np.sqrt(variancia))
+    u = stats.mannwhitneyu(b, a, alternative="two-sided").statistic
+    correcao = 0.5
+    return ReferenciaH0(
+        distribuicao,
+        centro,
+        float(distribuicao.ppf(1 - alpha / 2) - centro),
+        max(abs(float(u) - centro) - correcao, 0.0),
+        correcao,
+    )
+
+
+def referencias_h0(a: np.ndarray, b: np.ndarray, alpha: float = ALPHA) -> dict[str, ReferenciaH0]:
+    return {
+        TESTE_PARAMETRICO: referencia_welch(a, b, alpha),
+        TESTE_NAO_PARAMETRICO: referencia_mann_whitney(a, b, alpha),
+    }
+
+
+def estatisticas_sob_h0(
+    n: int,
+    situacao: str,
+    n_simulacoes: int,
+    rng: np.random.Generator,
+) -> dict[str, pd.DataFrame]:
+    """Estatística e p-valor de cada teste em conjuntos simulados com efeito zero."""
+    conjuntos = [gerar_conjunto(n, 0, situacao, rng) for _ in range(n_simulacoes)]
+    a, b = (np.array(grupo) for grupo in zip(*conjuntos))
+    welch = stats.ttest_ind(b, a, axis=1, equal_var=False, alternative="two-sided")
+    mann_whitney = stats.mannwhitneyu(b, a, axis=1, alternative="two-sided")
+    return {
+        TESTE_PARAMETRICO: pd.DataFrame({"estatistica": welch.statistic, "p_valor": welch.pvalue}),
+        TESTE_NAO_PARAMETRICO: pd.DataFrame({"estatistica": mann_whitney.statistic, "p_valor": mann_whitney.pvalue}),
+    }
+
+
+def conjunto_exemplo() -> tuple[np.ndarray, np.ndarray]:
+    return gerar_conjunto(N_EXEMPLO, EFEITO_EXEMPLO, SITUACAO_EXEMPLO, get_rng())
+
+
 def interpretar(teste: str, r: pd.Series, alpha: float = ALPHA) -> str:
     decisao = "rejeita H₀" if r["rejeita_h0"] else "não rejeita H₀"
     return (
@@ -73,7 +149,7 @@ def interpretar(teste: str, r: pd.Series, alpha: float = ALPHA) -> str:
 
 
 def main() -> None:
-    sem_bot, com_bot = gerar_conjunto(N_EXEMPLO, EFEITO_EXEMPLO, SITUACAO_EXEMPLO, get_rng())
+    sem_bot, com_bot = conjunto_exemplo()
     resultados = aplicar_testes(sem_bot, com_bot)
     PROCESSED_DATA_DIR.mkdir(parents=True, exist_ok=True)
     resultados.to_csv(ARQUIVO_EXEMPLO)
