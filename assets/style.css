@@ -1,0 +1,155 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500&display=swap");
+
+:root {
+  --bg: #fafafa;
+  --surface: #ffffff;
+  --border: #e7e7ea;
+  --text: #111113;
+  --muted: #6b6b76;
+  --soft: #f2f2f4;
+  --radius: 12px;
+}
+
+/* ---------- Base ---------- */
+html, body, .stApp, .stMarkdown, button, input {
+  font-family: "Inter", system-ui, sans-serif !important;
+}
+.stApp { background: var(--bg); }
+[data-testid="stMainBlockContainer"], .block-container {
+  max-width: 1040px;
+  padding-top: 2.5rem;
+  padding-bottom: 4rem;
+}
+
+/* Esconde o "chrome" padrão do Streamlit */
+#MainMenu, footer, [data-testid="stDecoration"], [data-testid="stToolbar"] { display: none !important; }
+[data-testid="stHeader"] { background: transparent; }
+
+/* ---------- Cabeçalho ---------- */
+.top { padding-bottom: 1.75rem; border-bottom: 1px solid var(--border); margin-bottom: .5rem; }
+
+.top-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.eyebrow { font-size: .8rem; font-weight: 500; color: var(--muted); }
+
+.links { display: flex; flex-wrap: wrap; gap: .5rem; }
+.links a {
+  padding: .4rem .8rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text) !important;
+  font-size: .85rem;
+  font-weight: 500;
+  text-decoration: none !important;
+  transition: background .15s, color .15s, border-color .15s;
+}
+.links a:hover { background: var(--text); border-color: var(--text); color: #fff !important; }
+
+.top h1 {
+  font-size: clamp(2.2rem, 5vw, 3.2rem);
+  font-weight: 800;
+  letter-spacing: -.035em;
+  line-height: 1.05;
+  color: var(--text);
+  margin: 2.5rem 0 .75rem;
+  padding: 0;
+}
+.lede { font-size: 1.05rem; line-height: 1.6; color: var(--muted); max-width: 620px; margin: 0 0 1.5rem; }
+
+.meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .4rem 1.25rem;
+  font-size: .85rem;
+  color: var(--muted);
+}
+.meta b { color: var(--text); font-weight: 600; font-family: "JetBrains Mono", monospace; font-size: .8rem; }
+.meta .sep { width: 1px; height: 1rem; background: var(--border); }
+.key { display: inline-flex; align-items: center; gap: .4rem; color: var(--text); font-weight: 500; }
+.key i { width: .6rem; height: .6rem; border-radius: 50%; display: inline-block; }
+
+/* ---------- Seções ---------- */
+.sec-head {
+  display: flex;
+  align-items: center;
+  gap: .75rem;
+  margin: 2.5rem 0 .75rem;
+  scroll-margin-top: 1.5rem;
+}
+.sec-num {
+  display: grid;
+  place-items: center;
+  width: 1.9rem;
+  height: 1.9rem;
+  border-radius: 8px;
+  background: var(--text);
+  color: #fff;
+  font-size: .85rem;
+  font-weight: 700;
+}
+.sec-head h2 {
+  font-size: 1.35rem;
+  font-weight: 700;
+  letter-spacing: -.015em;
+  color: var(--text);
+  margin: 0;
+  padding: 0;
+}
+.sec-tag {
+  margin-left: auto;
+  padding: .15rem .55rem;
+  border-radius: 6px;
+  background: var(--soft);
+  color: var(--muted);
+  font-family: "JetBrains Mono", monospace;
+  font-size: .75rem;
+}
+
+/* Cartão de conteúdo: st.container(key="sec-...") */
+[class*="st-key-sec-"] {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.25rem 1.5rem;
+}
+
+.pending { font-size: .95rem; line-height: 1.55; color: var(--muted); }
+.pending b {
+  display: inline-block;
+  margin-right: .5rem;
+  padding: .1rem .5rem;
+  border-radius: 6px;
+  background: var(--soft);
+  color: var(--text);
+  font-size: .75rem;
+  font-weight: 600;
+}
+
+/* ---------- Sidebar ---------- */
+[data-testid="stSidebar"] { background: var(--surface); border-right: 1px solid var(--border); }
+.nav-title {
+  font-size: .75rem;
+  font-weight: 600;
+  color: var(--muted);
+  margin: .5rem 0 .75rem .6rem;
+}
+.nav a {
+  display: flex;
+  align-items: center;
+  gap: .7rem;
+  padding: .5rem .6rem;
+  border-radius: 8px;
+  color: var(--text) !important;
+  font-size: .92rem;
+  text-decoration: none !important;
+  transition: background .15s;
+}
+.nav a:hover { background: var(--soft); }
+.nav a span { width: 1.2rem; color: var(--muted); font-family: "JetBrains Mono", monospace; font-size: .75rem; }
