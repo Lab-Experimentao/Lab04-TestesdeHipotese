@@ -23,6 +23,18 @@ streamlit run app.py
 
 O dashboard abre em <http://localhost:8501>.
 
+## Dados reais
+
+Tempo até o merge de 30 PRs por grupo do [TryGhost/Ghost](https://github.com/TryGhost/Ghost),
+antes e depois da adoção do bot de revisão CodeRabbit. Fonte e critérios em
+[`data/raw/README.md`](data/raw/README.md). O CSV já está no repositório; para refazer a coleta
+(requer `gh auth login`) e a análise descritiva:
+
+```bash
+python -m src.coleta       # gera data/raw/prs_elegiveis.csv e data/raw/prs_merge.csv
+python -m src.descritiva   # gera data/processed/descritiva.csv
+```
+
 ## Estrutura
 
 ```
@@ -34,10 +46,12 @@ O dashboard abre em <http://localhost:8501>.
 ├── .streamlit/
 │   └── config.toml      # Tema base do Streamlit
 ├── data/
-│   ├── raw/             # Dados reais coletados (~30 obs. por grupo)
-│   └── processed/       # Resultados das simulações
+│   ├── raw/             # Dados reais coletados (CSV + README com a fonte)
+│   └── processed/       # Estatísticas descritivas e resultados das simulações
 └── src/
-    └── config.py        # Semente, α, nº de simulações, paleta de cores e links
+    ├── config.py        # Semente, α, nº de simulações, paleta de cores e links
+    ├── coleta.py        # Coleta dos PRs pela API do GitHub
+    └── descritiva.py    # Média, mediana, assimetria e outliers por grupo
 ```
 
 ## Sugestão para os gráficos: Apache ECharts

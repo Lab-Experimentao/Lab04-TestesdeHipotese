@@ -171,6 +171,19 @@ html, body, .stApp, .stMarkdown, button, input {
 .facts .todo { font-style: italic; }
 @media (max-width: 640px) { .facts { grid-template-columns: 1fr; gap: .25rem; } .facts dd { margin-bottom: .75rem; } }
 
+/* Tabela descritiva (seção 2) */
+.stats-table { width: 100%; border-collapse: collapse; margin: 0 0 1.25rem; font-size: .92rem; }
+.stats-table th, .stats-table td {
+  padding: .45rem .75rem !important;
+  border: none !important;
+  border-bottom: 1px solid var(--border) !important;
+  text-align: right;
+}
+.stats-table th:first-child { text-align: left; font-weight: 500; color: var(--muted); }
+.stats-table thead th { font-weight: 600; color: var(--text); border-bottom: 1px solid var(--text) !important; }
+.stats-table td { font-family: "JetBrains Mono", monospace; font-size: .85rem; color: var(--text); }
+.stats-table tbody tr:last-child th, .stats-table tbody tr:last-child td { border-bottom: none !important; }
+
 /* ---------- Sidebar ---------- */
 [data-testid="stSidebar"] { background: var(--surface); border-right: 1px solid var(--border); }
 .nav-title {
