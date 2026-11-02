@@ -26,6 +26,9 @@ REPO_URL = "https://github.com/Lab-Experimentao/Lab04-TestesdeHipotese"
 TESTE_PARAMETRICO = "t de Welch"
 TESTE_NAO_PARAMETRICO = "Mann-Whitney"
 
+# Grupos comparados, na ordem em que aparecem no dashboard
+NOMES_GRUPOS = {"sem_bot": "Sem bot", "com_bot": "Com bot"}
+
 # Paleta fixa por teste: a mesma cor em todos os gráficos (G1 a G4)
 CORES_TESTES = {
     TESTE_PARAMETRICO: "#2563EB",      # azul
@@ -35,7 +38,7 @@ CORES_TESTES = {
 # Cores auxiliares
 COR_REAL = "#52525B"          # dados reais (G1)
 COR_SIMULADO = "#A1A1AA"      # dados simulados (G1)
-COR_REJEICAO = "#DC2626"      # região de rejeição (G2)
+COR_REJEICAO = "#BE185D"      # região de rejeição (G2); um vermelho se confundiria com o laranja do Mann-Whitney
 COR_REFERENCIA = "#111113"    # linha de 5% (G3)
 
 

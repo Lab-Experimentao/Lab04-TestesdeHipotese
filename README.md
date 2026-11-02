@@ -54,7 +54,8 @@ python -m src.testes       # gera data/processed/exemplo_simulado.csv
     ├── coleta.py        # Coleta dos PRs pela API do GitHub
     ├── descritiva.py    # Média, mediana, assimetria e outliers por grupo
     ├── simulacao.py     # Gerador de dados simulados calibrado nos dados reais
-    └── testes.py        # t de Welch e Mann-Whitney: estatística, p-valor e tamanho do efeito
+    ├── testes.py        # t de Welch e Mann-Whitney: estatística, p-valor, efeito e distribuição sob H₀
+    └── graficos.py      # Gráficos do dashboard, em Plotly (G1 e G2)
 ```
 
 ## Sugestão para os gráficos: Apache ECharts
