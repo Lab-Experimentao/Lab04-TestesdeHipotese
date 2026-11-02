@@ -5,6 +5,7 @@ Execute com: streamlit run app.py
 
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import streamlit as st
 
@@ -14,17 +15,23 @@ from src.config import (
     CORES_TESTES,
     DASHBOARD_URL,
     N_SIMULACOES,
+    NOMES_GRUPOS,
     PROJECTS_URL,
     REPO_URL,
     SEED,
     TESTE_NAO_PARAMETRICO,
     TESTE_PARAMETRICO,
+    get_rng,
 )
 from src.descritiva import ARQUIVO_AMOSTRA, carregar_amostra, descritiva
+from src.graficos import fmt, g1_real_simulado
+from src.simulacao import calibrar, gerar_conjunto
 
 CSS_PATH = Path(__file__).parent / "assets" / "style.css"
 ELEGIVEIS_PATH = Path(__file__).parent / "data" / "raw" / "prs_elegiveis.csv"
-NOMES_GRUPOS = {"sem_bot": "Sem bot", "com_bot": "Com bot"}
+# Observações por grupo usadas para descrever a forma de cada gerador, sem o ruído de um conjunto só
+N_REFERENCIA = 100_000
+PERCENTIS = {"Mediana": 0.5, "P75": 0.75, "P90": 0.9, "P99": 0.99}
 
 st.set_page_config(
     page_title="Lab04 - Testes de Hipótese",
@@ -114,9 +121,31 @@ def dados_reais() -> tuple[pd.DataFrame, pd.DataFrame, pd.Series]:
     return _dados_reais(versao)
 
 
-def fmt(x: float, casas: int = 1) -> str:
-    """Número no formato brasileiro: 1.234,5"""
-    return f"{x:,.{casas}f}".replace(",", "X").replace(".", ",").replace("X", ".")
+@st.cache_data
+def _dados_simulados(versao: float, n: int) -> tuple[pd.DataFrame, pd.DataFrame, pd.Series]:  # noqa: ARG001
+    sem_bot, com_bot = gerar_conjunto(n, 0, "mistura", get_rng())
+    conjunto = pd.DataFrame({
+        "grupo": ["sem_bot"] * len(sem_bot) + ["com_bot"] * len(com_bot),
+        "horas_ate_merge": np.concatenate([sem_bot, com_bot]),
+    })
+    elegiveis = pd.read_csv(ELEGIVEIS_PATH)["horas_ate_merge"]
+    amostras = {
+        "Elegíveis": elegiveis,
+        "Mistura": pd.Series(np.concatenate(gerar_conjunto(N_REFERENCIA, 0, "mistura", get_rng()))),
+        "Lognormal simples": pd.Series(
+            np.concatenate(gerar_conjunto(N_REFERENCIA, 0, "lognormal", get_rng()))
+        ),
+    }
+    quantis = pd.DataFrame({
+        nome: x.quantile(list(PERCENTIS.values())).set_axis(list(PERCENTIS))
+        for nome, x in amostras.items()
+    })
+    return conjunto, quantis, elegiveis
+
+
+def dados_simulados(n: int) -> tuple[pd.DataFrame, pd.DataFrame, pd.Series]:
+    # Com efeito zero, as diferenças entre os dois grupos simulados são puro acaso
+    return _dados_simulados(ELEGIVEIS_PATH.stat().st_mtime, n)
 
 
 def conteudo_cenario() -> None:
@@ -171,8 +200,58 @@ def conteudo_cenario() -> None:
     )
 
 
+def intervalo(a: float, b: float, casas: int = 1) -> str:
+    """Faixa entre dois valores, em ordem crescente; um valor só, se forem iguais no formato."""
+    menor, maior = fmt(min(a, b), casas), fmt(max(a, b), casas)
+    return menor if menor == maior else f"{menor} a {maior}"
+
+
 def conteudo_dados() -> None:
-    _, tabela, _ = dados_reais()
+    amostra, tabela, _ = dados_reais()
+    n_grupo = int(tabela["n"].iloc[0])
+    conjunto, quantis, elegiveis = dados_simulados(n_grupo)
+    tabela_sim = descritiva(conjunto)
+    c = calibrar()
+
+    with st.container(key="grafico-g1"):
+        st.plotly_chart(
+            g1_real_simulado(amostra, conjunto),
+            theme=None,
+            config={"displayModeBar": False},
+        )
+
+    real_sem, real_com = tabela.loc["sem_bot"], tabela.loc["com_bot"]
+    sim_sem, sim_com = tabela_sim.loc["sem_bot"], tabela_sim.loc["com_bot"]
+    p90 = quantis.loc["P90"]
+    st.markdown(
+        f"""
+        <dl class="facts">
+          <dt>O que o gráfico mostra</dt>
+          <dd>Cada linha é um grupo: à esquerda, os {n_grupo} PRs reais; à direita, {n_grupo} PRs
+          de um conjunto simulado com efeito zero, em que os dois grupos vêm do mesmo gerador e
+          as diferenças entre eles são puro acaso.</dd>
+          <dt>Forma dos dados</dt>
+          <dd>Reais e simulados são muito assimétricos e têm outliers: a mediana fica abaixo de
+          1 h, a assimetria vai de {intervalo(real_sem["assimetria"], real_com["assimetria"])} nos
+          reais e de {intervalo(sim_sem["assimetria"], sim_com["assimetria"])} nos simulados, e os
+          outliers são {intervalo(real_sem["outliers_pct"], real_com["outliers_pct"], 0)}% dos
+          reais e {intervalo(sim_sem["outliers_pct"], sim_com["outliers_pct"], 0)}% dos simulados.</dd>
+          <dt>Parâmetros da simulação</dt>
+          <dd>Usamos uma <b>mistura de duas lognormais</b>, ajustada por EM aos {len(elegiveis)}
+          PRs elegíveis, porque o tempo até o merge tem dois picos (merges rápidos e lentos) e
+          uma lognormal simples subestima a cauda: o P90 dela é de {fmt(p90["Lognormal simples"], 0)} h,
+          contra {fmt(p90["Elegíveis"], 0)} h nos dados e {fmt(p90["Mistura"], 0)} h na mistura.</dd>
+          <dt>Real × simulado</dt>
+          <dd>Os conjuntos simulados têm mais PRs lentos do que os reais (média de
+          {intervalo(sim_sem["media_h"], sim_com["media_h"])} h, contra
+          {intervalo(real_sem["media_h"], real_com["media_h"])} h) porque a amostra real quase não
+          pegou a cauda: seu máximo é de {fmt(max(real_sem["max_h"], real_com["max_h"]), 0)} h,
+          contra {fmt(elegiveis.max(), 0)} h entre os elegíveis, de onde calibramos a simulação.</dd>
+        </dl>
+        """,
+        unsafe_allow_html=True,
+    )
+
     linhas = [
         ("n", "n", 0),
         ("Média (h)", "media_h", 1),
@@ -185,12 +264,10 @@ def conteudo_dados() -> None:
         ("Desvio do log", "desvio_log", 2),
         ("Assimetria do log", "assimetria_log", 2),
     ]
-    grupos = ["sem_bot", "com_bot"]
     corpo = ""
     for rotulo, coluna, casas in linhas:
         celulas = ""
-        for g in grupos:
-            r = tabela.loc[g]
+        for r in (real_sem, real_com, sim_sem, sim_com):
             if rotulo.startswith("Mínimo"):
                 valor = f"{fmt(r['min_h'], casas)} – {fmt(r['max_h'], casas)}"
             elif rotulo.startswith("Outliers"):
@@ -199,16 +276,50 @@ def conteudo_dados() -> None:
                 valor = fmt(r[coluna], casas)
             celulas += f"<td>{valor}</td>"
         corpo += f"<tr><th>{rotulo}</th>{celulas}</tr>"
-    cabecalho_tabela = "".join(f"<th>{NOMES_GRUPOS[g]}</th>" for g in grupos)
+    nomes_grupos = "".join(f"<th>{nome}</th>" for nome in NOMES_GRUPOS.values()) * 2
+
+    componentes = "".join(
+        f"<tr><th>{nome}</th><td>{fmt(100 * peso, 0)}%</td>"
+        f"<td>{fmt(np.exp(mu), 2)}</td><td>{fmt(sigma, 2)}</td></tr>"
+        for nome, peso, mu, sigma in (
+            ("Merges rápidos", 1 - c.peso_lento, c.mu_rapido, c.sigma_rapido),
+            ("Merges lentos", c.peso_lento, c.mu_lento, c.sigma_lento),
+        )
+    )
+    ajuste = "".join(
+        f"<tr><th>{percentil}</th>" + "".join(f"<td>{fmt(v, 2 if v < 1 else 1)}</td>" for v in linha)
+        + "</tr>"
+        for percentil, linha in zip(quantis.index, quantis.to_numpy())
+    )
+    colunas_ajuste = "".join(f"<th>{nome}</th>" for nome in quantis.columns)
 
     st.markdown(
         f"""
-        <table class="stats-table">
-          <thead><tr><th>Tempo até o merge</th>{cabecalho_tabela}</tr></thead>
-          <tbody>{corpo}</tbody>
-        </table>
-        <div class="pending"><b>Pendente</b>G1: histograma dos dados reais ao lado dos
-        simulados, e o texto sobre a escolha dos parâmetros da simulação.</div>
+        <div class="table-scroll">
+          <table class="stats-table">
+            <thead>
+              <tr><th rowspan="2">Conjuntos do G1</th><th colspan="2">Reais</th><th colspan="2">Simulados</th></tr>
+              <tr>{nomes_grupos}</tr>
+            </thead>
+            <tbody>{corpo}</tbody>
+          </table>
+        </div>
+        <div class="tables-pair">
+          <div class="table-scroll">
+            <table class="stats-table">
+              <caption>Parâmetros da mistura</caption>
+              <thead><tr><th>Componente</th><th>Peso</th><th>Mediana (h)</th><th>Desvio do log</th></tr></thead>
+              <tbody>{componentes}</tbody>
+            </table>
+          </div>
+          <div class="table-scroll">
+            <table class="stats-table">
+              <caption>Ajuste aos {len(elegiveis)} elegíveis (h)</caption>
+              <thead><tr><th>Percentil</th>{colunas_ajuste}</tr></thead>
+              <tbody>{ajuste}</tbody>
+            </table>
+          </div>
+        </div>
         """,
         unsafe_allow_html=True,
     )

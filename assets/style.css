@@ -183,6 +183,29 @@ html, body, .stApp, .stMarkdown, button, input {
 .stats-table thead th { font-weight: 600; color: var(--text); border-bottom: 1px solid var(--text) !important; }
 .stats-table td { font-family: "JetBrains Mono", monospace; font-size: .85rem; color: var(--text); }
 .stats-table tbody tr:last-child th, .stats-table tbody tr:last-child td { border-bottom: none !important; }
+.stats-table caption {
+  caption-side: top;
+  padding: 0 0 .5rem;
+  text-align: left;
+  font-size: .85rem;
+  font-weight: 600;
+  color: var(--text);
+}
+/* Em telas estreitas, o gráfico mantém a largura legível e rola na horizontal */
+[class*="st-key-grafico-"] { overflow-x: auto; }
+[class*="st-key-grafico-"] > * { min-width: 640px; }
+
+/* Cabeçalho em dois níveis: a primeira célula da segunda linha já é coluna de dados */
+.stats-table thead th[colspan] { text-align: center; }
+.stats-table thead tr + tr th:first-child { text-align: right; font-weight: 600; color: var(--text); }
+.stats-table td { white-space: nowrap; }
+.table-scroll { overflow-x: auto; }
+.facts { margin-bottom: 1.5rem; }
+.tables-pair {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr));
+  gap: 0 2rem;
+}
 
 /* ---------- Sidebar ---------- */
 [data-testid="stSidebar"] { background: var(--surface); border-right: 1px solid var(--border); }

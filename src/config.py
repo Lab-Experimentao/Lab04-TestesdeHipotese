@@ -26,6 +26,9 @@ REPO_URL = "https://github.com/Lab-Experimentao/Lab04-TestesdeHipotese"
 TESTE_PARAMETRICO = "t de Welch"
 TESTE_NAO_PARAMETRICO = "Mann-Whitney"
 
+# Grupos comparados, na ordem em que aparecem no dashboard
+NOMES_GRUPOS = {"sem_bot": "Sem bot", "com_bot": "Com bot"}
+
 # Paleta fixa por teste: a mesma cor em todos os gráficos (G1 a G4)
 CORES_TESTES = {
     TESTE_PARAMETRICO: "#2563EB",      # azul
