@@ -1,0 +1,3 @@
+teste,estatistica,p_valor,efeito,medida_efeito,rejeita_h0
+t de Welch,1.3306167114038587,0.19302036852560614,0.33910189058215096,g de Hedges,False
+Mann-Whitney,600.5,0.02656515080619101,0.33444444444444454,rank-biserial,True

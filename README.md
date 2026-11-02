@@ -33,6 +33,7 @@ antes e depois da adoção do bot de revisão CodeRabbit. Fonte e critérios em
 ```bash
 python -m src.coleta       # gera data/raw/prs_elegiveis.csv e data/raw/prs_merge.csv
 python -m src.descritiva   # gera data/processed/descritiva.csv
+python -m src.testes       # gera data/processed/exemplo_simulado.csv
 ```
 
 ## Estrutura
@@ -51,7 +52,9 @@ python -m src.descritiva   # gera data/processed/descritiva.csv
 └── src/
     ├── config.py        # Semente, α, nº de simulações, paleta de cores e links
     ├── coleta.py        # Coleta dos PRs pela API do GitHub
-    └── descritiva.py    # Média, mediana, assimetria e outliers por grupo
+    ├── descritiva.py    # Média, mediana, assimetria e outliers por grupo
+    ├── simulacao.py     # Gerador de dados simulados calibrado nos dados reais
+    └── testes.py        # t de Welch e Mann-Whitney: estatística, p-valor e tamanho do efeito
 ```
 
 ## Sugestão para os gráficos: Apache ECharts
