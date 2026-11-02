@@ -15,6 +15,8 @@ from src.config import (
     PROJECTS_URL,
     REPO_URL,
     SEED,
+    TESTE_NAO_PARAMETRICO,
+    TESTE_PARAMETRICO,
 )
 
 CSS_PATH = Path(__file__).parent / "assets" / "style.css"
@@ -94,6 +96,57 @@ def sidebar() -> None:
     )
 
 
+def conteudo_cenario() -> None:
+    welch = TESTE_PARAMETRICO
+    mw = TESTE_NAO_PARAMETRICO
+    st.markdown(
+        f"""
+        <p class="question">PRs revisados por um bot de revisão automática são mergeados
+        em um tempo diferente dos PRs sem bot?</p>
+
+        <div class="hyp">
+          <div>
+            <span class="hyp-label">H₀</span>
+            <p>O tempo até o merge tem a mesma distribuição com e sem bot.</p>
+            <ul class="hyp-tests">
+              <li>{welch}: μ<sub>bot</sub> = μ<sub>sem</sub></li>
+              <li>{mw}: P(X<sub>bot</sub> &gt; X<sub>sem</sub>) = ½</li>
+            </ul>
+          </div>
+          <div>
+            <span class="hyp-label">H₁</span>
+            <p>O tempo até o merge é diferente com bot e sem bot.</p>
+            <ul class="hyp-tests">
+              <li>{welch}: μ<sub>bot</sub> ≠ μ<sub>sem</sub></li>
+              <li>{mw}: P(X<sub>bot</sub> &gt; X<sub>sem</sub>) ≠ ½</li>
+            </ul>
+          </div>
+        </div>
+
+        <dl class="facts">
+          <dt>Teste bicaudal</dt>
+          <dd>O bot pode acelerar o merge (feedback imediato) ou atrasá-lo (mais comentários
+          para resolver antes da aprovação). As duas direções interessam, e não temos razão
+          prévia para descartar nenhuma.</dd>
+          <dt>Expectativa antes de simular</dt>
+          <dd>Esperamos que o <b>{mw}</b> se saia melhor. Tempos até o merge são muito
+          assimétricos e têm outliers (PRs esquecidos por semanas), o que infla a variância e
+          tira poder do {welch}, que compara médias. O {mw} compara postos e não é afetado
+          pela magnitude dos valores extremos.</dd>
+          <dt>Dados reais</dt>
+          <dd class="todo">Pendente: repositório de origem e número de PRs coletados por grupo.</dd>
+        </dl>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+# Seções já escritas; as demais mostram o aviso de pendente
+CONTEUDOS = {
+    "cenario": conteudo_cenario,
+}
+
+
 def secao(numero: int, ancora: str, titulo: str, grafico: str | None, descricao: str) -> None:
     tag = f"<span class='sec-tag'>{grafico}</span>" if grafico else ""
     st.markdown(
@@ -102,10 +155,13 @@ def secao(numero: int, ancora: str, titulo: str, grafico: str | None, descricao:
         unsafe_allow_html=True,
     )
     with st.container(key=f"sec-{ancora}"):
-        st.markdown(
-            f"<div class='pending'><b>Pendente</b>{descricao}</div>",
-            unsafe_allow_html=True,
-        )
+        if ancora in CONTEUDOS:
+            CONTEUDOS[ancora]()
+        else:
+            st.markdown(
+                f"<div class='pending'><b>Pendente</b>{descricao}</div>",
+                unsafe_allow_html=True,
+            )
 
 
 aplicar_estilo()

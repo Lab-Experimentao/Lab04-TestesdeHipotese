@@ -22,9 +22,9 @@ DASHBOARD_URL = "https://<preencher-apos-publicar>.streamlit.app"
 PROJECTS_URL = "https://github.com/orgs/Lab-Experimentao/projects/3/views/1"
 REPO_URL = "https://github.com/Lab-Experimentao/Lab04-TestesdeHipotese"
 
-# Par de testes escolhido pelo grupo (ajustar quando o par for definido)
-TESTE_PARAMETRICO = "Teste paramétrico"
-TESTE_NAO_PARAMETRICO = "Teste não paramétrico"
+# Par de testes escolhido pelo grupo: P1
+TESTE_PARAMETRICO = "t de Welch"
+TESTE_NAO_PARAMETRICO = "Mann-Whitney"
 
 # Paleta fixa por teste: a mesma cor em todos os gráficos (G1 a G4)
 CORES_TESTES = {
