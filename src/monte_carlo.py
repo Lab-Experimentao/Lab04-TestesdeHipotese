@@ -19,6 +19,7 @@ from src.config import (
     N_SIMULACOES,
     PROCESSED_DATA_DIR,
     SEED,
+    TESTE_NAO_PARAMETRICO,
     get_rng,
 )
 from src.simulacao import SITUACOES, calibrar, gerar_lote
@@ -28,11 +29,29 @@ ARQUIVO_SIMULACOES = PROCESSED_DATA_DIR / "simulacoes.csv"
 
 # Quantil da normal para a margem de erro de 95% da proporção estimada
 Z_95 = 1.96
+# Taxa aceitável, em múltiplos de α: critério liberal de Bradley (1978), "Robustness?"
+FAIXA_ACEITAVEL = (0.5, 1.5)
+# Acima desta parcela das rejeições numa só direção, o erro não está dividido entre as caudas
+LIMITE_UMA_DIRECAO = 0.75
 
 
 def rng_da_configuracao(situacao: str, efeito: float) -> np.random.Generator:
     # crc32 em vez de hash(): o hash de textos muda a cada execução do Python
     return get_rng(np.random.SeedSequence([SEED, zlib.crc32(situacao.encode()), round(efeito * 1000)]))
+
+
+def gerar_lote_da_configuracao(
+    situacao: str,
+    efeito: float,
+    n_simulacoes: int = N_SIMULACOES,
+) -> tuple[np.ndarray, np.ndarray]:
+    return gerar_lote(
+        n_simulacoes,
+        SITUACOES[situacao].n,
+        efeito,
+        situacao,
+        rng_da_configuracao(situacao, efeito),
+    )
 
 
 def simular_configuracao(
@@ -41,13 +60,7 @@ def simular_configuracao(
     n_simulacoes: int = N_SIMULACOES,
 ) -> pd.DataFrame:
     """Uma linha por teste e por α, com as rejeições em n_simulacoes conjuntos."""
-    sem_bot, com_bot = gerar_lote(
-        n_simulacoes,
-        SITUACOES[situacao].n,
-        efeito,
-        situacao,
-        rng_da_configuracao(situacao, efeito),
-    )
+    sem_bot, com_bot = gerar_lote_da_configuracao(situacao, efeito, n_simulacoes)
     linhas = []
     for teste, resultado in testes_em_lote(sem_bot, com_bot).items():
         for alpha in (ALPHA, ALPHA_ESTRITO):
@@ -78,10 +91,52 @@ def simular_tudo(n_simulacoes: int = N_SIMULACOES) -> pd.DataFrame:
     )
 
 
-def main() -> None:
+def salvar_simulacoes() -> pd.DataFrame:
     resultados = simular_tudo()
     PROCESSED_DATA_DIR.mkdir(parents=True, exist_ok=True)
     resultados.to_csv(ARQUIVO_SIMULACOES, index=False, float_format="%.6g")
+    return resultados
+
+
+def carregar_simulacoes() -> pd.DataFrame:
+    """Lê o CSV, gerando-o antes se não existir: o dashboard abre com um único comando."""
+    if not ARQUIVO_SIMULACOES.exists():
+        salvar_simulacoes()
+    return pd.read_csv(ARQUIVO_SIMULACOES)
+
+
+def _diagnostico(linha: pd.Series, alpha: float) -> str:
+    if not linha["h0_verdadeira"]:
+        return "Não se aplica"
+    if linha["proporcao"] < FAIXA_ACEITAVEL[0] * alpha:
+        return "Conservador"
+    if linha["proporcao"] > FAIXA_ACEITAVEL[1] * alpha:
+        return "Liberal"
+    diagnostico = f"Perto de {100 * alpha:g}%"
+    parcela = max(linha["rejeicoes_com_bot_maior"], linha["rejeicoes"] - linha["rejeicoes_com_bot_maior"])
+    parcela /= linha["rejeicoes"]
+    if parcela > LIMITE_UMA_DIRECAO:
+        diagnostico += f", mas {100 * parcela:.0f}% numa só direção"
+    return diagnostico
+
+
+def erro_tipo_1(simulacoes: pd.DataFrame, alpha: float = ALPHA) -> pd.DataFrame:
+    """Linhas com efeito zero, uma por situação × teste, com o diagnóstico de cada taxa.
+
+    h0_verdadeira indica se a taxa mede mesmo erro tipo I: em variancias_diferentes, com efeito
+    zero, só o H₀ do Mann-Whitney é verdadeiro.
+    """
+    linhas = simulacoes[(simulacoes["efeito"] == 0) & (simulacoes["alpha"] == alpha)].copy()
+    linhas["h0_verdadeira"] = [
+        SITUACOES[situacao].mede_erro_tipo_1 or teste == TESTE_NAO_PARAMETRICO
+        for situacao, teste in zip(linhas["situacao"], linhas["teste"])
+    ]
+    linhas["diagnostico"] = linhas.apply(_diagnostico, axis=1, alpha=alpha)
+    return linhas
+
+
+def main() -> None:
+    resultados = salvar_simulacoes()
 
     principal = resultados[resultados["alpha"] == ALPHA]
     with pd.option_context("display.width", 120, "display.float_format", "{:.1f}".format):

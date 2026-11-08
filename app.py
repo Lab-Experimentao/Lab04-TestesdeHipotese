@@ -13,6 +13,7 @@ from scipy import stats
 from src.coleta import REPO
 from src.config import (
     ALPHA,
+    ALPHA_ESTRITO,
     CORES_TESTES,
     DASHBOARD_URL,
     N_SIMULACOES,
@@ -25,16 +26,32 @@ from src.config import (
     get_rng,
 )
 from src.descritiva import ARQUIVO_AMOSTRA, carregar_amostra, descritiva
-from src.graficos import fmt, g1_real_simulado, g2_estatistica_h0
-from src.simulacao import LIMIAR_OUTLIER_H, PARCELA_MENOR, SITUACOES, calibrar, gerar_conjunto
+from src.graficos import fmt, g1_real_simulado, g2_estatistica_h0, g3_erro_tipo_1
+from src.monte_carlo import (
+    ARQUIVO_SIMULACOES,
+    FAIXA_ACEITAVEL,
+    carregar_simulacoes,
+    erro_tipo_1,
+    gerar_lote_da_configuracao,
+)
+from src.simulacao import (
+    LIMIAR_OUTLIER_H,
+    N_PEQUENO,
+    N_POR_GRUPO,
+    PARCELA_MENOR,
+    SITUACOES,
+    calibrar,
+    gerar_conjunto,
+)
 from src.testes import (
     EFEITO_EXEMPLO,
     N_EXEMPLO,
     SITUACAO_EXEMPLO,
     aplicar_testes,
     conjunto_exemplo,
-    estatisticas_sob_h0,
+    erro_tipo_1_exato_mann_whitney,
     referencias_h0,
+    testes_em_lote,
 )
 
 CSS_PATH = Path(__file__).parent / "assets" / "style.css"
@@ -162,11 +179,22 @@ def dados_simulados(n: int) -> tuple[pd.DataFrame, pd.DataFrame, pd.Series]:
 
 @st.cache_data
 def _simulacao_h0(versao: float) -> dict[str, pd.DataFrame]:  # noqa: ARG001
-    return estatisticas_sob_h0(N_EXEMPLO, SITUACAO_EXEMPLO, N_SIMULACOES, get_rng())
+    # Os mesmos conjuntos do CSV: as taxas do G2 e do G3 são idênticas
+    return testes_em_lote(*gerar_lote_da_configuracao(SITUACAO_EXEMPLO, 0))
 
 
 def simulacao_h0() -> dict[str, pd.DataFrame]:
     return _simulacao_h0(ELEGIVEIS_PATH.stat().st_mtime)
+
+
+@st.cache_data
+def _simulacoes(versao: float) -> pd.DataFrame:  # noqa: ARG001
+    return carregar_simulacoes()
+
+
+def simulacoes() -> pd.DataFrame:
+    versao = ARQUIVO_SIMULACOES.stat().st_mtime if ARQUIVO_SIMULACOES.exists() else 0.0
+    return _simulacoes(versao)
 
 
 @st.cache_data
@@ -381,7 +409,7 @@ def tabela_situacoes(c) -> None:
         <div class="table-scroll">
           <table class="stats-table situations-table">
             <caption>Situações da simulação (Q1 a Q3)</caption>
-            <thead><tr><th>Situação</th><th>PRs por grupo</th><th>Assimetria típica</th>
+            <thead><tr><th>Situação</th><th class="num">PRs por grupo</th><th class="num">Assimetria típica</th>
             <th>Como é gerada</th><th>O que viola no Welch</th><th>Por que simular</th></tr></thead>
             <tbody>{corpo}</tbody>
           </table>
@@ -402,15 +430,15 @@ def conteudo_testes() -> None:
     sem_bot, com_bot = conjunto_exemplo()
     exemplo = aplicar_testes(sem_bot, com_bot)
     referencias = referencias_h0(sem_bot, com_bot)
-    simulacoes = simulacao_h0()
-    rejeicoes = {t: 100 * (s["p_valor"] < ALPHA).mean() for t, s in simulacoes.items()}
+    estatisticas_h0 = simulacao_h0()
+    rejeicoes = {t: 100 * (s["p_valor"] < ALPHA).mean() for t, s in estatisticas_h0.items()}
     t_critico = referencias[welch].limites_criticos[1]
     u_menor, u_maior = referencias[mw].limites_criticos
     multiplicador = np.exp(EFEITO_EXEMPLO * calibrar().sigma)
 
     with st.container(key="grafico-g2"):
         st.plotly_chart(
-            g2_estatistica_h0(exemplo, referencias, simulacoes, ALPHA),
+            g2_estatistica_h0(exemplo, referencias, estatisticas_h0, ALPHA),
             theme=None,
             config={"displayModeBar": False},
         )
@@ -481,11 +509,103 @@ def conteudo_testes() -> None:
     )
 
 
+def conteudo_erro_tipo_1() -> None:
+    welch = TESTE_PARAMETRICO
+    mw = TESTE_NAO_PARAMETRICO
+    erro = erro_tipo_1(simulacoes(), ALPHA).set_index(["situacao", "teste"])
+    erro_estrito = erro_tipo_1(simulacoes(), ALPHA_ESTRITO).set_index(["situacao", "teste"])
+
+    with st.container(key="grafico-g3"):
+        st.plotly_chart(
+            g3_erro_tipo_1(erro.reset_index(), ALPHA),
+            theme=None,
+            config={"displayModeBar": False},
+        )
+
+    def taxa(situacao: str, teste: str = welch) -> str:
+        return f"{fmt(100 * erro.loc[(situacao, teste), 'proporcao'], 1)}%"
+
+    taxas_mw = erro.xs(mw, level="teste")["proporcao"]
+    desigual = erro.loc[("desbalanceado", welch)]
+    exato_30 = erro_tipo_1_exato_mann_whitney(N_POR_GRUPO, N_POR_GRUPO)
+    exato_10 = erro_tipo_1_exato_mann_whitney(N_PEQUENO, N_PEQUENO)
+    faixa = [100 * ALPHA * limite for limite in FAIXA_ACEITAVEL]
+
+    st.markdown(
+        f"""
+        <dl class="facts">
+          <dt>O que o gráfico mostra</dt>
+          <dd>Cada ponto é a proporção de p &lt; {fmt(ALPHA, 2)} em {fmt(N_SIMULACOES, 0)} conjuntos
+          sem efeito, com a margem de erro de 95%: como H₀ é verdadeira, toda rejeição é um erro
+          tipo I, e o esperado é ficar perto da linha de {fmt(100 * ALPHA, 0)}%.</dd>
+          <dt>{mw}</dt>
+          <dd>Ficou perto de {fmt(100 * ALPHA, 0)}% em todas as situações
+          ({fmt(100 * taxas_mw.min(), 1)}% a {fmt(100 * taxas_mw.max(), 1)}%), porque sob H₀ os postos
+          têm a mesma distribuição qualquer que seja a forma dos dados; os
+          {taxa("normal", mw)} do controle são acaso, já que a taxa exata é de
+          {fmt(100 * exato_30, 1)}%.</dd>
+          <dt>{welch}</dt>
+          <dd>Foi quem se desviou: ficou perto de {fmt(100 * ALPHA, 0)}% no controle
+          ({taxa("normal")}) e com outliers ({taxa("outliers")}), mas foi <b>conservador</b> com
+          assimetria forte ({taxa("mistura")} no cenário principal, {taxa("lognormal")} na lognormal e
+          {taxa("amostra_pequena")} com amostra pequena), pois um PR muito lento infla o desvio do
+          próprio grupo e o t raramente chega à região de rejeição.</dd>
+          <dt>Grupos desiguais</dt>
+          <dd>Os {taxa("desbalanceado")} do {welch} escondem outro desvio:
+          {int(desigual["rejeicoes_com_bot_maior"])} das {int(desigual["rejeicoes"])} rejeições apontam
+          merge mais lento com bot, em vez de se dividirem entre os dois lados, porque elas ocorrem
+          quando o grupo menor fica sem PRs lentos.</dd>
+        </dl>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    def celula_taxa(linha: pd.Series) -> str:
+        if not linha["h0_verdadeira"]:
+            return "–"
+        return f"{fmt(100 * linha['proporcao'], 2)}% ± {fmt(100 * linha['margem_erro'], 2)}"
+
+    corpo = ""
+    for chave, situacao in SITUACOES.items():
+        l_welch, l_mw = erro.loc[(chave, welch)], erro.loc[(chave, mw)]
+        corpo += (
+            f"<tr><th>{situacao.nome}</th>"
+            f"<td class='num'>{celula_taxa(l_welch)}</td><td>{l_welch['diagnostico']}</td>"
+            f"<td class='num'>{celula_taxa(l_mw)}</td><td>{l_mw['diagnostico']}</td>"
+            f"<td class='num'>{celula_taxa(erro_estrito.loc[(chave, welch)])}</td>"
+            f"<td class='num'>{celula_taxa(erro_estrito.loc[(chave, mw)])}</td></tr>"
+        )
+    variancias = erro.loc[("variancias_diferentes", welch)]
+    st.markdown(
+        f"""
+        <div class="table-scroll">
+          <table class="stats-table situations-table">
+            <caption>Erro tipo I por situação</caption>
+            <thead><tr><th>Situação</th><th class="num">{welch}</th><th>Diagnóstico</th>
+            <th class="num">{mw}</th><th>Diagnóstico</th>
+            <th class="num">{welch} (α = {fmt(ALPHA_ESTRITO, 2)})</th>
+            <th class="num">{mw} (α = {fmt(ALPHA_ESTRITO, 2)})</th></tr></thead>
+            <tbody>{corpo}</tbody>
+          </table>
+        </div>
+        <p class="table-note">"Perto" é a faixa de {fmt(faixa[0], 1)}% a {fmt(faixa[1], 1)}%, o critério
+        liberal de Bradley (1978). Conservador é o teste que rejeita menos que α: ele erra menos do que
+        promete, mas o custo aparece no poder (seção 5). O {mw} tende a ficar um pouco abaixo de α por
+        causa da correção de continuidade: sem empates, a taxa exata é de {fmt(100 * exato_30, 1)}% com
+        {N_POR_GRUPO} PRs por grupo e de {fmt(100 * exato_10, 1)}% com {N_PEQUENO}. Em "Variâncias
+        diferentes", com efeito zero, as médias dos grupos diferem: a H₀ do {welch} é falsa, e seus
+        {fmt(100 * variancias["proporcao"], 1)}% não são erro tipo I.</p>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 # Seções já escritas; as demais mostram o aviso de pendente
 CONTEUDOS = {
     "cenario": conteudo_cenario,
     "dados": conteudo_dados,
     "testes": conteudo_testes,
+    "erro-tipo-1": conteudo_erro_tipo_1,
 }
 
 
