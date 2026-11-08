@@ -8,6 +8,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import streamlit as st
+from scipy import stats
 
 from src.coleta import REPO
 from src.config import (
@@ -25,7 +26,7 @@ from src.config import (
 )
 from src.descritiva import ARQUIVO_AMOSTRA, carregar_amostra, descritiva
 from src.graficos import fmt, g1_real_simulado, g2_estatistica_h0
-from src.simulacao import calibrar, gerar_conjunto
+from src.simulacao import LIMIAR_OUTLIER_H, PARCELA_MENOR, SITUACOES, calibrar, gerar_conjunto
 from src.testes import (
     EFEITO_EXEMPLO,
     N_EXEMPLO,
@@ -41,6 +42,8 @@ ELEGIVEIS_PATH = Path(__file__).parent / "data" / "raw" / "prs_elegiveis.csv"
 # Observações por grupo usadas para descrever a forma de cada gerador, sem o ruído de um conjunto só
 N_REFERENCIA = 100_000
 PERCENTIS = {"Mediana": 0.5, "P75": 0.75, "P90": 0.9, "P99": 0.99}
+# Conjuntos usados para estimar a assimetria típica de cada situação
+N_CONJUNTOS_ASSIMETRIA = 2_000
 
 st.set_page_config(
     page_title="Lab04 - Testes de Hipótese",
@@ -164,6 +167,24 @@ def _simulacao_h0(versao: float) -> dict[str, pd.DataFrame]:  # noqa: ARG001
 
 def simulacao_h0() -> dict[str, pd.DataFrame]:
     return _simulacao_h0(ELEGIVEIS_PATH.stat().st_mtime)
+
+
+@st.cache_data
+def _assimetrias_tipicas(versao: float) -> dict[str, float]:  # noqa: ARG001
+    assimetrias = {}
+    for chave, situacao in SITUACOES.items():
+        rng = get_rng()
+        grupos = [
+            grupo
+            for _ in range(N_CONJUNTOS_ASSIMETRIA)
+            for grupo in gerar_conjunto(situacao.n, 0, chave, rng)
+        ]
+        assimetrias[chave] = float(np.median([stats.skew(grupo, bias=False) for grupo in grupos]))
+    return assimetrias
+
+
+def assimetrias_tipicas() -> dict[str, float]:
+    return _assimetrias_tipicas(ELEGIVEIS_PATH.stat().st_mtime)
 
 
 def conteudo_cenario() -> None:
@@ -338,6 +359,38 @@ def conteudo_dados() -> None:
             </table>
           </div>
         </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    tabela_situacoes(c)
+
+
+def tabela_situacoes(c) -> None:
+    assimetrias = assimetrias_tipicas()
+    menor = round(2 * SITUACOES["desbalanceado"].n * PARCELA_MENOR)
+    tamanhos = {"desbalanceado": f"{menor} e {2 * SITUACOES['desbalanceado'].n - menor}"}
+    corpo = "".join(
+        f"<tr><th>{s.nome}</th><td class='num'>{tamanhos.get(chave, s.n)}</td>"
+        f"<td class='num'>{fmt(assimetrias[chave], 1)}</td>"
+        f"<td>{s.descricao}</td><td>{s.pressuposto}</td><td>{s.justificativa}</td></tr>"
+        for chave, s in SITUACOES.items()
+    )
+    dias = LIMIAR_OUTLIER_H // 24
+    st.markdown(
+        f"""
+        <div class="table-scroll">
+          <table class="stats-table situations-table">
+            <caption>Situações da simulação (Q1 a Q3)</caption>
+            <thead><tr><th>Situação</th><th>PRs por grupo</th><th>Assimetria típica</th>
+            <th>Como é gerada</th><th>O que viola no Welch</th><th>Por que simular</th></tr></thead>
+            <tbody>{corpo}</tbody>
+          </table>
+        </div>
+        <p class="table-note">Em todas, o tamanho do efeito é um deslocamento no log dos tempos, em
+        desvios ({fmt(c.sigma, 2)}), para que os resultados sejam comparáveis. Em "Outliers",
+        {fmt(100 * c.parcela_outlier, 1)}% dos PRs (a parcela real parada por mais de {dias} dias) são
+        deslocados em {fmt(c.deslocamento_outlier, 1)} desvios (a distância do PR real mais lento até
+        a mediana).</p>
         """,
         unsafe_allow_html=True,
     )
