@@ -128,11 +128,27 @@ def estatisticas_sob_h0(
     """Estatística e p-valor de cada teste em conjuntos simulados com efeito zero."""
     conjuntos = [gerar_conjunto(n, 0, situacao, rng) for _ in range(n_simulacoes)]
     a, b = (np.array(grupo) for grupo in zip(*conjuntos))
+    return testes_em_lote(a, b)
+
+
+def testes_em_lote(a: np.ndarray, b: np.ndarray) -> dict[str, pd.DataFrame]:
+    """Aplica os dois testes a cada linha de duas matrizes conjuntos × observações.
+
+    Retorna, por teste, a estatística, o p-valor e se o segundo grupo ficou acima do primeiro.
+    """
     welch = stats.ttest_ind(b, a, axis=1, equal_var=False, alternative="two-sided")
     mann_whitney = stats.mannwhitneyu(b, a, axis=1, alternative="two-sided")
     return {
-        TESTE_PARAMETRICO: pd.DataFrame({"estatistica": welch.statistic, "p_valor": welch.pvalue}),
-        TESTE_NAO_PARAMETRICO: pd.DataFrame({"estatistica": mann_whitney.statistic, "p_valor": mann_whitney.pvalue}),
+        TESTE_PARAMETRICO: pd.DataFrame({
+            "estatistica": welch.statistic,
+            "p_valor": welch.pvalue,
+            "segundo_maior": welch.statistic > 0,
+        }),
+        TESTE_NAO_PARAMETRICO: pd.DataFrame({
+            "estatistica": mann_whitney.statistic,
+            "p_valor": mann_whitney.pvalue,
+            "segundo_maior": mann_whitney.statistic > a.shape[1] * b.shape[1] / 2,
+        }),
     }
 
 
