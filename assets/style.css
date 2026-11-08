@@ -200,6 +200,24 @@ html, body, .stApp, .stMarkdown, button, input {
 .stats-table thead tr + tr th:first-child { text-align: right; font-weight: 600; color: var(--text); }
 .stats-table td { white-space: nowrap; }
 .table-scroll { overflow-x: auto; }
+/* Tabela de situações (seção 2): colunas de texto, em vez de números */
+.situations-table { min-width: 760px; margin-top: 1.25rem; }
+.situations-table th, .situations-table td { vertical-align: top; text-align: left; }
+.situations-table td {
+  white-space: normal;
+  font-family: inherit;
+  font-size: .85rem;
+  line-height: 1.45;
+  color: var(--muted);
+}
+.situations-table td.num {
+  white-space: nowrap;
+  text-align: right;
+  font-family: "JetBrains Mono", monospace;
+  color: var(--text);
+}
+.situations-table th:nth-child(2), .situations-table th:nth-child(3) { text-align: right; }
+.table-note { margin: 0; font-size: .85rem; line-height: 1.55; color: var(--muted); }
 .facts { margin-bottom: 1.5rem; }
 .tables-pair {
   display: grid;
