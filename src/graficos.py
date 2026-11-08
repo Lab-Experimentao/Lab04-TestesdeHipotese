@@ -12,8 +12,11 @@ from src.config import (
     CORES_TESTES,
     NOMES_GRUPOS,
     TESTE_NAO_PARAMETRICO,
+    COR_REFERENCIA,
     TESTE_PARAMETRICO,
 )
+from src.monte_carlo import FAIXA_ACEITAVEL
+from src.simulacao import SITUACOES
 from src.testes import ReferenciaH0
 
 # Mesmos tons de assets/style.css
@@ -31,6 +34,11 @@ FOLGA_Y = 1.25
 ALCANCE_G2 = 4
 BINS_POR_DESVIO_G2 = 4
 PONTOS_CURVA = 400
+
+# Fim do eixo x do G3 (%) e distância de cada teste ao centro da linha da situação
+FIM_X_G3 = 8
+DESLOCAMENTO_G3 = {TESTE_PARAMETRICO: -0.16, TESTE_NAO_PARAMETRICO: 0.16}
+SIMBOLOS_G3 = {TESTE_PARAMETRICO: "circle", TESTE_NAO_PARAMETRICO: "diamond"}
 
 
 def fmt(x: float, casas: int = 1) -> str:
@@ -378,6 +386,139 @@ def g2_estatistica_h0(
         height=540,
         margin={"l": 64, "r": 24, "t": 88, "b": 110},
         bargap=0.04,
+        separators=",.",
+        paper_bgcolor="#ffffff",
+        plot_bgcolor="#ffffff",
+        hoverlabel={"font_family": FONTE},
+    )
+    fig.update_annotations(font_family=FONTE)
+    return fig
+
+
+def g3_erro_tipo_1(erro: pd.DataFrame, alpha: float) -> go.Figure:
+    """Erro tipo I de cada teste por situação, com a linha em α e a faixa aceitável.
+
+    erro: resultado de erro_tipo_1. Um teste fica de fora da situação em que seu H₀ é falso.
+    """
+    posicoes = {situacao: i for i, situacao in enumerate(SITUACOES)}
+    limites_y = [-0.5, len(posicoes) - 0.5]
+    faixa = [100 * alpha * limite for limite in FAIXA_ACEITAVEL]
+
+    fig = go.Figure()
+    fig.add_trace(
+        go.Scatter(
+            x=[faixa[0], faixa[1], faixa[1], faixa[0]],
+            y=[limites_y[0], limites_y[0], limites_y[1], limites_y[1]],
+            mode="none",
+            fill="toself",
+            fillcolor=_rgba(COR_SIMULADO, 0.18),
+            name=f"Faixa aceitável ({fmt(faixa[0], 1)}% a {fmt(faixa[1], 1)}%)",
+            hoverinfo="skip",
+        )
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=[100 * alpha] * 2,
+            y=limites_y,
+            mode="lines",
+            line={"color": COR_REFERENCIA, "width": 1.5},
+            name=f"{fmt(100 * alpha, 0)}% esperados",
+            hoverinfo="skip",
+        )
+    )
+
+    for teste, cor in CORES_TESTES.items():
+        linhas = erro[(erro["teste"] == teste) & erro["h0_verdadeira"]]
+        y = linhas["situacao"].map(posicoes) + DESLOCAMENTO_G3[teste]
+        fig.add_trace(
+            go.Scatter(
+                x=100 * linhas["proporcao"],
+                y=y,
+                mode="markers",
+                name=teste,
+                marker={
+                    "color": cor,
+                    "size": 12,
+                    "symbol": SIMBOLOS_G3[teste],
+                    "line": {"color": "#ffffff", "width": 2},
+                },
+                error_x={
+                    "type": "data",
+                    "array": 100 * linhas["margem_erro"],
+                    "color": cor,
+                    "thickness": 1.5,
+                    "width": 4,
+                },
+                customdata=[
+                    (SITUACOES[s].nome, fmt(100 * p, 2), fmt(100 * m, 2), d)
+                    for s, p, m, d in zip(
+                        linhas["situacao"], linhas["proporcao"], linhas["margem_erro"], linhas["diagnostico"]
+                    )
+                ],
+                hovertemplate=(
+                    "%{customdata[0]}<br>%{customdata[1]}% ± %{customdata[2]}<br>"
+                    f"%{{customdata[3]}}<extra>{teste}</extra>"
+                ),
+            )
+        )
+        # Só os desvios ganham rótulo: a tabela abaixo do gráfico traz todos os valores
+        for p, m, posicao in zip(linhas["proporcao"], linhas["margem_erro"], y):
+            if not faixa[0] <= 100 * p <= faixa[1]:
+                fig.add_annotation(
+                    x=100 * (p + m),
+                    y=posicao,
+                    text=f"{fmt(100 * p, 1)}%",
+                    showarrow=False,
+                    xanchor="left",
+                    xshift=8,
+                    font={"size": 12, "color": COR_TEXTO},
+                )
+
+    for linha in erro[~erro["h0_verdadeira"]].itertuples():
+        fig.add_annotation(
+            x=0.1,
+            y=posicoes[linha.situacao] + DESLOCAMENTO_G3[linha.teste],
+            text=f"{linha.teste}: H₀ falsa aqui, não é erro tipo I",
+            showarrow=False,
+            xanchor="left",
+            font={"size": 11, "color": COR_SUAVE},
+        )
+
+    fig.update_xaxes(
+        title_text=f"Erro tipo I (% de conjuntos sem efeito com p < {fmt(alpha, 2)})",
+        range=[0, FIM_X_G3],
+        dtick=1,
+        ticksuffix="%",
+        ticks="outside",
+        tickcolor=COR_GRADE,
+        linecolor=COR_GRADE,
+        gridcolor=COR_GRADE,
+        zeroline=False,
+        fixedrange=True,
+    )
+    fig.update_yaxes(
+        title_text="Situação simulada",
+        title_standoff=16,
+        tickvals=list(posicoes.values()),
+        ticktext=[SITUACOES[situacao].nome for situacao in posicoes],
+        range=limites_y[::-1],
+        showgrid=False,
+        zeroline=False,
+        ticklen=0,
+        fixedrange=True,
+        tickfont={"color": COR_TEXTO},
+    )
+    fig.update_layout(
+        title={
+            "text": f"G3. Erro tipo I dos dois testes em cada situação (α = {fmt(alpha, 2)})",
+            "x": 0,
+            "xanchor": "left",
+            "font": {"size": 16, "color": COR_TEXTO},
+        },
+        legend={"orientation": "h", "x": 0, "xanchor": "left", "y": -0.16, "yanchor": "top"},
+        font={"family": FONTE, "size": 12, "color": COR_SUAVE},
+        height=560,
+        margin={"l": 210, "r": 24, "t": 56, "b": 88},
         separators=",.",
         paper_bgcolor="#ffffff",
         plot_bgcolor="#ffffff",

@@ -119,16 +119,25 @@ def referencias_h0(a: np.ndarray, b: np.ndarray, alpha: float = ALPHA) -> dict[s
     }
 
 
-def estatisticas_sob_h0(
-    n: int,
-    situacao: str,
-    n_simulacoes: int,
-    rng: np.random.Generator,
-) -> dict[str, pd.DataFrame]:
-    """Estatística e p-valor de cada teste em conjuntos simulados com efeito zero."""
-    conjuntos = [gerar_conjunto(n, 0, situacao, rng) for _ in range(n_simulacoes)]
-    a, b = (np.array(grupo) for grupo in zip(*conjuntos))
-    return testes_em_lote(a, b)
+def erro_tipo_1_exato_mann_whitney(n_a: int, n_b: int, alpha: float = ALPHA) -> float:
+    """Taxa exata de rejeição sob H₀, sem empates, do teste com aproximação normal.
+
+    A aproximação e a correção de continuidade não dão exatamente α. Sem empates, a distribuição
+    de U sob H₀ não depende dos dados e sai de uma recorrência sobre o maior elemento: ele vem
+    de a, com probabilidade i / (i + j), e soma j a U, ou vem de b, e não soma nada.
+    """
+    distribuicoes = [[np.ones(1)] * (n_b + 1) for _ in range(n_a + 1)]
+    for i in range(1, n_a + 1):
+        for j in range(1, n_b + 1):
+            distribuicao = np.zeros(i * j + 1)
+            distribuicao[j:] += i / (i + j) * distribuicoes[i - 1][j]
+            distribuicao[:i * (j - 1) + 1] += j / (i + j) * distribuicoes[i][j - 1]
+            distribuicoes[i][j] = distribuicao
+
+    u = np.arange(n_a * n_b + 1)
+    desvio = np.sqrt(n_a * n_b * (n_a + n_b + 1) / 12)
+    rejeita = (np.abs(u - n_a * n_b / 2) - 0.5) / desvio > stats.norm.ppf(1 - alpha / 2)
+    return float(distribuicoes[n_a][n_b][rejeita].sum())
 
 
 def testes_em_lote(a: np.ndarray, b: np.ndarray) -> dict[str, pd.DataFrame]:
