@@ -9,7 +9,11 @@ SEED = 42
 
 # Parâmetros da simulação (seção 2.d do enunciado)
 ALPHA = 0.05
+ALPHA_ESTRITO = 0.01          # só para comparar com ALPHA (pergunta 12 da apresentação)
 N_SIMULACOES = 10_000
+# Deslocamento de com_bot no log, em desvios. O início é mais fino porque o efeito observado nos
+# dados reais é pequeno (de -0,16 nos elegíveis a +0,26 na amostra)
+EFEITOS = (0, 0.1, 0.25, 0.5, 0.75, 1, 1.5, 2)
 
 # Caminhos
 ROOT_DIR = Path(__file__).resolve().parent.parent
@@ -42,6 +46,6 @@ COR_REJEICAO = "#BE185D"      # região de rejeição (G2); um vermelho se confu
 COR_REFERENCIA = "#111113"    # linha de 5% (G3)
 
 
-def get_rng(seed: int = SEED) -> np.random.Generator:
+def get_rng(seed: int | np.random.SeedSequence = SEED) -> np.random.Generator:
     """Retorna um gerador NumPy com semente fixa."""
     return np.random.default_rng(seed)

@@ -154,27 +154,35 @@ def calibrar() -> Calibracao:
     )
 
 
-def _sortear_log(n: int, situacao: str, sigma: float, c: Calibracao, rng: np.random.Generator) -> np.ndarray:
+def _sortear_log(
+    forma: tuple[int, int],
+    situacao: str,
+    sigma: float,
+    c: Calibracao,
+    rng: np.random.Generator,
+) -> np.ndarray:
     if situacao in SITUACOES_MISTURA:
-        lento = rng.random(n) < c.peso_lento
+        lento = rng.random(forma) < c.peso_lento
         return rng.normal(
             np.where(lento, c.mu_lento, c.mu_rapido),
             np.where(lento, c.sigma_lento, c.sigma_rapido),
         )
-    log_x = rng.normal(c.mu, sigma, n)
+    log_x = rng.normal(c.mu, sigma, forma)
     if situacao == "outliers":
-        log_x += (rng.random(n) < c.parcela_outlier) * c.deslocamento_outlier * c.sigma
+        log_x += (rng.random(forma) < c.parcela_outlier) * c.deslocamento_outlier * c.sigma
     return log_x
 
 
-def gerar_conjunto(
+def gerar_lote(
+    n_conjuntos: int,
     n: int,
     efeito: float,
     situacao: str,
     rng: np.random.Generator,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Gera os tempos até o merge dos grupos (sem_bot, com_bot).
+    """Gera os tempos até o merge dos grupos (sem_bot, com_bot), em matrizes conjuntos × observações.
 
+    n_conjuntos: quantos conjuntos independentes sortear de uma só vez.
     n: observações por grupo (SITUACOES[situacao].n); na situação desbalanceada, 2n são
         divididas em 1:3.
     efeito: deslocamento de com_bot no log, em desvios (sigma), o mesmo em todas as situações.
@@ -199,9 +207,20 @@ def gerar_conjunto(
     elif situacao == "variancias_diferentes":
         sigma_sem, sigma_com = c.sigma_sem_bot, c.sigma_com_bot
 
-    log_sem = _sortear_log(n_sem, situacao, sigma_sem, c, rng)
-    log_com = _sortear_log(n_com, situacao, sigma_com, c, rng) + efeito * c.sigma
+    log_sem = _sortear_log((n_conjuntos, n_sem), situacao, sigma_sem, c, rng)
+    log_com = _sortear_log((n_conjuntos, n_com), situacao, sigma_com, c, rng) + efeito * c.sigma
 
     if SITUACOES[situacao].escala_log:
         return log_sem, log_com
     return tuple(np.maximum(np.exp(x).round(2), RESOLUCAO_H) for x in (log_sem, log_com))
+
+
+def gerar_conjunto(
+    n: int,
+    efeito: float,
+    situacao: str,
+    rng: np.random.Generator,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Gera um único conjunto: um lote de tamanho 1 de gerar_lote, com os mesmos parâmetros."""
+    sem_bot, com_bot = gerar_lote(1, n, efeito, situacao, rng)
+    return sem_bot[0], com_bot[0]

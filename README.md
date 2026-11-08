@@ -34,6 +34,7 @@ antes e depois da adoção do bot de revisão CodeRabbit. Fonte e critérios em
 python -m src.coleta       # gera data/raw/prs_elegiveis.csv e data/raw/prs_merge.csv
 python -m src.descritiva   # gera data/processed/descritiva.csv
 python -m src.testes       # gera data/processed/exemplo_simulado.csv
+python -m src.monte_carlo  # gera data/processed/simulacoes.csv (10.000 repetições por configuração)
 ```
 
 ## Estrutura
@@ -54,6 +55,7 @@ python -m src.testes       # gera data/processed/exemplo_simulado.csv
     ├── coleta.py        # Coleta dos PRs pela API do GitHub
     ├── descritiva.py    # Média, mediana, assimetria e outliers por grupo
     ├── simulacao.py     # Gerador de dados simulados calibrado nos dados reais
+    ├── monte_carlo.py   # Proporção de rejeições por situação × tamanho do efeito (Q1 a Q3)
     ├── testes.py        # t de Welch e Mann-Whitney: estatística, p-valor, efeito e distribuição sob H₀
     └── graficos.py      # Gráficos do dashboard, em Plotly (G1 e G2)
 ```
