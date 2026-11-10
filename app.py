@@ -26,15 +26,28 @@ from src.config import (
     get_rng,
 )
 from src.descritiva import ARQUIVO_AMOSTRA, carregar_amostra, descritiva
-from src.graficos import PODER_ALVO, fmt, g1_real_simulado, g2_estatistica_h0, g3_erro_tipo_1, g4_poder
+from src.graficos import (
+    PODER_ALVO,
+    fmt,
+    g1_real_simulado,
+    g2_estatistica_h0,
+    g3_erro_tipo_1,
+    g4_poder,
+    poder_interativo as grafico_poder_interativo,
+)
 from src.monte_carlo import (
     ARQUIVO_SIMULACOES,
+    EFEITOS_INTERATIVOS,
     FAIXA_ACEITAVEL,
+    N_INTERATIVOS,
+    N_SIMULACOES_INTERATIVO,
     Z_95,
     carregar_simulacoes,
     efeito_para_poder,
     erro_tipo_1,
     gerar_lote_da_configuracao,
+    poder_interativo,
+    valor_para_poder,
 )
 from src.simulacao import (
     LIMIAR_OUTLIER_H,
@@ -44,6 +57,7 @@ from src.simulacao import (
     SITUACOES,
     calibrar,
     gerar_conjunto,
+    gerar_lote,
 )
 from src.testes import (
     EFEITO_EXEMPLO,
@@ -63,6 +77,9 @@ N_REFERENCIA = 100_000
 PERCENTIS = {"Mediana": 0.5, "P75": 0.75, "P90": 0.9, "P99": 0.99}
 # Conjuntos usados para estimar a assimetria típica de cada situação
 N_CONJUNTOS_ASSIMETRIA = 2_000
+# Gráfico interativo: "Amostra pequena" é a mistura com n fixo, e ali o n já é um controle
+SITUACOES_INTERATIVAS = [s for s in SITUACOES if s != "amostra_pequena"]
+N_MIN_INTERATIVO, N_MAX_INTERATIVO = N_INTERATIVOS[0], N_INTERATIVOS[-1]
 
 st.set_page_config(
     page_title="Lab04 - Testes de Hipótese",
@@ -203,13 +220,9 @@ def simulacoes() -> pd.DataFrame:
 def _assimetrias_tipicas(versao: float) -> dict[str, float]:  # noqa: ARG001
     assimetrias = {}
     for chave, situacao in SITUACOES.items():
-        rng = get_rng()
-        grupos = [
-            grupo
-            for _ in range(N_CONJUNTOS_ASSIMETRIA)
-            for grupo in gerar_conjunto(situacao.n, 0, chave, rng)
-        ]
-        assimetrias[chave] = float(np.median([stats.skew(grupo, bias=False) for grupo in grupos]))
+        # Todos os conjuntos de uma vez: um a um, este cálculo dominava o primeiro carregamento
+        lote = gerar_lote(N_CONJUNTOS_ASSIMETRIA, situacao.n, 0, chave, get_rng())
+        assimetrias[chave] = float(np.median(np.concatenate([stats.skew(g, axis=1, bias=False) for g in lote])))
     return assimetrias
 
 
@@ -729,6 +742,198 @@ def conteudo_poder() -> None:
         o multiplicador ao lado é quantas vezes os tempos crescem. O efeito para {fmt(100 * PODER_ALVO, 0)}%
         é interpolado entre os {len(efeitos)} efeitos simulados, e a margem é de 95%. Em "Amostra pequena",
         são {N_PEQUENO} PRs por grupo; nas demais, {N_POR_GRUPO}.</p>
+        """,
+        unsafe_allow_html=True,
+    )
+    explorar_poder()
+
+
+@st.cache_data(max_entries=5_000, show_spinner=False)
+def _poder_ponto(versao: float, situacao: str, n: int, efeito: float) -> pd.DataFrame:  # noqa: ARG001
+    return poder_interativo(situacao, n, efeito)
+
+
+def poder_ponto(situacao: str, n: int, efeito: float) -> pd.DataFrame:
+    # Arredondar evita entradas duplicadas no cache por ruído de ponto flutuante do slider
+    return _poder_ponto(ELEGIVEIS_PATH.stat().st_mtime, situacao, n, round(efeito, 3))
+
+
+def curvas_interativas(situacao: str, n: int, efeito: float, alpha: float) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Poder × efeito no n escolhido e poder × n no efeito escolhido, com o ponto escolhido incluído."""
+    efeitos = sorted(set(EFEITOS_INTERATIVOS) | {round(efeito, 3)})
+    tamanhos = sorted(set(N_INTERATIVOS) | {n})
+    por_efeito = pd.concat([poder_ponto(situacao, n, e) for e in efeitos], ignore_index=True)
+    por_n = pd.concat([poder_ponto(situacao, v, efeito) for v in tamanhos], ignore_index=True)
+    return por_efeito[por_efeito["alpha"] == alpha], por_n[por_n["alpha"] == alpha]
+
+
+def vezes(multiplicador: float) -> str:
+    return fmt(multiplicador, 2 if multiplicador < 2 else 1 if multiplicador < 10 else 0)
+
+
+def chance_em_coletas(p: float) -> str:
+    """Poder em linguagem de coletas: "em cerca de 3 de cada 10 coletas (35%)"."""
+    pct = f"{fmt(100 * p, 1 if p < 0.1 else 0)}%"
+    if p == 0:
+        return f"em nenhuma das {fmt(N_SIMULACOES_INTERATIVO, 0)} coletas simuladas"
+    if p < 0.15:
+        return f"{'quase nunca' if p < 0.02 else 'raramente'} ({pct}, cerca de 1 a cada {fmt(round(1 / p), 0)} coletas)"
+    if p < 0.95:
+        return f"em cerca de {round(10 * p)} de cada 10 coletas ({pct})"
+    return f"quase sempre ({pct})"
+
+
+def _usar_dados_reais() -> None:
+    st.session_state["interativo_n"] = N_POR_GRUPO
+    st.session_state["interativo_efeito"] = round(efeito_real(), 2)
+
+
+@st.fragment
+def explorar_poder() -> None:
+    """Bônus: o poder dos dois testes recalculado para o n e o efeito escolhidos nos controles."""
+    welch = TESTE_PARAMETRICO
+    mw = TESTE_NAO_PARAMETRICO
+    st.markdown(
+        """
+        <div class="subhead"><h3>Explore o poder</h3><span class="sec-tag">Bônus</span></div>
+        <p class="table-note">Mude o tamanho da amostra e o tamanho do efeito para ver o poder dos dois
+        testes mudar. Cada ponto é recalculado na hora, a partir do mesmo gerador do G4.</p>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    # Valores iniciais pelo session_state, que o botão "Usar os dados reais" também altera
+    st.session_state.setdefault("interativo_n", N_POR_GRUPO)
+    st.session_state.setdefault("interativo_efeito", float(EFEITO_EXEMPLO))
+
+    col_n, col_efeito, col_situacao, col_alpha = st.columns([1.2, 1.2, 1.2, 0.8], gap="medium")
+    n = col_n.slider(
+        "PRs por grupo (n)",
+        N_MIN_INTERATIVO,
+        N_MAX_INTERATIVO,
+        step=5,
+        key="interativo_n",
+    )
+    efeito = col_efeito.slider(
+        "Tamanho do efeito (desvios no log)",
+        0.0,
+        float(max(EFEITOS_INTERATIVOS)),
+        step=0.01,
+        key="interativo_efeito",
+        help="Deslocamento do grupo com bot no log dos tempos. Zero é H₀ verdadeira.",
+    )
+    situacao = col_situacao.selectbox(
+        "Situação simulada",
+        SITUACOES_INTERATIVAS,
+        index=SITUACOES_INTERATIVAS.index(SITUACAO_EXEMPLO),
+        format_func=lambda s: SITUACOES[s].nome,
+        key="interativo_situacao",
+    )
+    alpha = col_alpha.radio(
+        "Nível α",
+        [ALPHA, ALPHA_ESTRITO],
+        format_func=lambda a: fmt(a, 2),
+        horizontal=True,
+        key="interativo_alpha",
+    )
+    st.button(
+        f"Usar os dados reais (n = {N_POR_GRUPO}, efeito = {fmt(efeito_real(), 2)})",
+        on_click=_usar_dados_reais,
+        type="tertiary",
+    )
+
+    with st.spinner("Simulando..."):
+        por_efeito, por_n = curvas_interativas(situacao, n, efeito, alpha)
+    multiplicador = float(np.exp(efeito * calibrar().sigma))
+    ponto = por_efeito[np.isclose(por_efeito["efeito"], round(efeito, 3))].set_index("teste")
+
+    def cartao(teste: str) -> str:
+        linha = ponto.loc[teste]
+        if efeito == 0:
+            o_que = "de alarmes falsos"
+            alvo = "Sem efeito, não há o que detectar"
+        else:
+            o_que = "de chance de detectar o efeito"
+            valor = valor_para_poder(por_n[por_n["teste"] == teste], PODER_ALVO, "n")
+            if valor is None:
+                alvo = f"Não chega a {fmt(100 * PODER_ALVO, 0)}% nem com {N_MAX_INTERATIVO} PRs por grupo"
+            elif linha["proporcao"] >= PODER_ALVO:
+                alvo = (
+                    f"Já passa de {fmt(100 * PODER_ALVO, 0)}%, o padrão em pesquisa: "
+                    f"bastariam ~{fmt(np.ceil(valor), 0)} PRs por grupo"
+                )
+            else:
+                alvo = (
+                    f"Para chegar a {fmt(100 * PODER_ALVO, 0)}%, o padrão em pesquisa: "
+                    f"~{fmt(np.ceil(valor), 0)} PRs por grupo"
+                )
+        return (
+            f"<div><span class='key'><i style='background:{CORES_TESTES[teste]}'></i>{teste}</span>"
+            f"<b>{fmt(100 * linha['proporcao'], 1)}%</b>"
+            f"<small>{o_que} (± {fmt(100 * linha['margem_erro'], 1)})</small><small>{alvo}</small></div>"
+        )
+
+    cartoes = cartao(welch) + cartao(mw)
+    diferenca = ponto.loc[mw, "proporcao"] - ponto.loc[welch, "proporcao"]
+    margem = np.hypot(ponto.loc[welch, "margem_erro"], ponto.loc[mw, "margem_erro"])
+    if abs(diferenca) <= margem:
+        veredito = "Empate, dentro da margem de erro"
+    else:
+        veredito = f"{mw if diferenca > 0 else welch} à frente"
+    if efeito == 0:
+        leitura = (
+            f"Com efeito zero, H₀ é verdadeira e a proporção é o <b>erro tipo I</b>: o esperado é ficar perto de "
+            f"{fmt(100 * alpha, 0)}%."
+        )
+        if not SITUACOES[situacao].mede_erro_tipo_1:
+            leitura += f" Nesta situação, só para o {mw}: as médias diferem, e a H₀ do {welch} é falsa."
+    else:
+        # O teste com mais poder vem primeiro na frase
+        primeiro, segundo = (mw, welch) if diferenca >= 0 else (welch, mw)
+        leitura = (
+            f"<b>Se o bot realmente deixasse os merges {vezes(multiplicador)} vezes mais lentos</b> e fossem "
+            f"coletados {n} PRs de cada grupo, o {primeiro} perceberia a diferença "
+            f"{chance_em_coletas(ponto.loc[primeiro, 'proporcao'])}, e o {segundo}, "
+            f"{chance_em_coletas(ponto.loc[segundo, 'proporcao'])}"
+        )
+        if abs(diferenca) <= margem:
+            leitura += ": os dois testes se saem igualmente bem aqui."
+        elif primeiro == mw:
+            leitura += f", porque os poucos PRs muito lentos inflam a variância do {welch} e escondem a diferença."
+        else:
+            leitura += ", porque, com dados simétricos, a média resume bem cada grupo."
+    if alpha == ALPHA_ESTRITO:
+        leitura += (
+            f" Com α = {fmt(alpha, 2)}, os testes exigem mais evidência para rejeitar H₀: há menos alarmes "
+            "falsos, mas também menos detecções."
+        )
+
+    st.markdown(
+        f"""
+        <div class="power-kpis">
+          {cartoes}
+          <div><span class="key">Diferença ({mw} − {welch})</span>
+          <b>{"+" if diferenca > 0 else ""}{fmt(100 * diferenca, 1)} pontos</b>
+          <small>{veredito} (± {fmt(100 * margem, 1)})</small></div>
+        </div>
+        <p class="table-note power-reading">{leitura}</p>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    with st.container(key="grafico-interativo"):
+        st.plotly_chart(
+            grafico_poder_interativo(por_efeito, por_n, n, efeito, multiplicador, alpha),
+            theme=None,
+            config={"displayModeBar": False},
+        )
+
+    margem_maxima = fmt(100 * Z_95 * np.sqrt(0.25 / N_SIMULACOES_INTERATIVO), 1)
+    st.markdown(
+        f"""
+        <p class="table-note">Cada ponto repete a coleta {fmt(N_SIMULACOES_INTERATIVO, 0)} vezes, em vez das
+        {fmt(N_SIMULACOES, 0)} do G4, para responder rápido. Por isso, os valores podem variar até
+        {margem_maxima} pontos para mais ou para menos.</p>
         """,
         unsafe_allow_html=True,
     )

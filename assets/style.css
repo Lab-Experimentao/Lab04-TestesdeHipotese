@@ -240,6 +240,43 @@ html, body, .stApp, .stMarkdown, button, input {
   gap: 0 2rem;
 }
 
+/* Gráfico interativo de poder (seção 5, bônus) */
+.subhead {
+  display: flex;
+  align-items: center;
+  gap: .75rem;
+  margin: 2rem 0 .35rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--border);
+}
+.subhead h3 { font-size: 1.1rem; font-weight: 700; letter-spacing: -.01em; color: var(--text); margin: 0; padding: 0; }
+.subhead .sec-tag { margin-left: 0; }
+.power-kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr));
+  gap: .75rem;
+  margin: .5rem 0 .75rem;
+}
+.power-kpis > div {
+  display: flex;
+  flex-direction: column;
+  gap: .2rem;
+  padding: .8rem 1rem;
+  border-radius: 10px;
+  background: var(--soft);
+}
+.power-kpis .key { font-size: .85rem; }
+.power-kpis b {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 1.5rem;
+  font-weight: 500;
+  color: var(--text);
+  line-height: 1.2;
+}
+.power-kpis small { font-size: .8rem; color: var(--muted); }
+.power-reading { margin-bottom: .5rem; }
+.power-reading b { color: var(--text); }
+
 /* ---------- Sidebar ---------- */
 [data-testid="stSidebar"] { background: var(--surface); border-right: 1px solid var(--border); }
 .nav-title {
