@@ -215,6 +215,23 @@ def assimetrias_tipicas() -> dict[str, float]:
     return _assimetrias_tipicas(ELEGIVEIS_PATH.stat().st_mtime)
 
 
+@st.cache_data
+def _testes_reais(versao: tuple[float, float]) -> dict[str, tuple[pd.DataFrame, int, int, float]]:  # noqa: ARG001
+    """Por conjunto: resultados dos testes, PRs sem e com bot e deslocamento no log, em desvios."""
+    conjuntos = {"Amostra": carregar_amostra(), "Elegíveis": pd.read_csv(ELEGIVEIS_PATH)}
+    resultados = {}
+    for nome, df in conjuntos.items():
+        sem_bot, com_bot = (df.loc[df["grupo"] == g, "horas_ate_merge"].to_numpy() for g in NOMES_GRUPOS)
+        # Mesma unidade do efeito simulado, para ler o poder no G4
+        deslocamento = (np.log(com_bot).mean() - np.log(sem_bot).mean()) / calibrar().sigma
+        resultados[nome] = (aplicar_testes(sem_bot, com_bot), len(sem_bot), len(com_bot), float(deslocamento))
+    return resultados
+
+
+def testes_reais() -> dict[str, tuple[pd.DataFrame, int, int, float]]:
+    return _testes_reais((ARQUIVO_AMOSTRA.stat().st_mtime, ELEGIVEIS_PATH.stat().st_mtime))
+
+
 def conteudo_cenario() -> None:
     welch = TESTE_PARAMETRICO
     mw = TESTE_NAO_PARAMETRICO
@@ -600,12 +617,114 @@ def conteudo_erro_tipo_1() -> None:
     )
 
 
+def com_sinal(x: float, casas: int = 2) -> str:
+    return f"+{fmt(x, casas)}" if x > 0 else fmt(x, casas)
+
+
+def maiuscula(texto: str) -> str:
+    # capitalize() poria o resto em minúsculas: "H₀" viraria "h₀"
+    return texto[:1].upper() + texto[1:]
+
+
+def direcao(efeito: float) -> str:
+    return "merge mais lento com bot" if efeito > 0 else "merge mais rápido com bot"
+
+
+def conteudo_dados_reais() -> None:
+    welch = TESTE_PARAMETRICO
+    mw = TESTE_NAO_PARAMETRICO
+    reais = testes_reais()
+    amostra, n_sem, n_com, _ = reais["Amostra"]
+    elegiveis, n_sem_el, n_com_el, deslocamento = reais["Elegíveis"]
+
+    # Poder com o efeito dos elegíveis e o tamanho da amostra, interpolado entre os efeitos simulados
+    sim = simulacoes()
+    sim = sim[(sim["situacao"] == SITUACAO_EXEMPLO) & (sim["alpha"] == ALPHA)]
+    poder = {
+        t: np.interp(abs(deslocamento), g["efeito"], g["proporcao"]) for t, g in sim.groupby("teste")
+    }
+
+    def p(resultados: pd.DataFrame, teste: str) -> str:
+        return fmt(resultados.loc[teste, "p_valor"], 3)
+
+    def efeito(resultados: pd.DataFrame, teste: str) -> str:
+        return com_sinal(resultados.loc[teste, "efeito"])
+
+    def decisao(resultados: pd.DataFrame, teste: str) -> str:
+        return "rejeita H₀" if resultados.loc[teste, "rejeita_h0"] else "não rejeita H₀"
+
+    oposta = np.sign(amostra.loc[mw, "efeito"]) != np.sign(elegiveis.loc[mw, "efeito"])
+    st.markdown(
+        f"""
+        <dl class="facts">
+          <dt>Amostra coletada</dt>
+          <dd>Com {n_sem} + {n_com} PRs, nenhum teste rejeita H₀ a α = {fmt(ALPHA, 2)}: o {mw}
+          chega perto (p = {p(amostra, mw)}, r = {efeito(amostra, mw)}, {direcao(amostra.loc[mw, "efeito"])})
+          e o {welch} não vê diferença (p = {p(amostra, welch)}).</dd>
+          <dt>Todos os elegíveis</dt>
+          <dd>Com os {n_sem_el + n_com_el} PRs, o {mw} {decisao(elegiveis, mw)} (p = {p(elegiveis, mw)}),
+          {"mas na direção oposta à da amostra" if oposta else "na mesma direção da amostra"}:
+          r = {efeito(elegiveis, mw)}, {direcao(elegiveis.loc[mw, "efeito"])}. O {welch}
+          {decisao(elegiveis, welch)} (p = {p(elegiveis, welch)}).</dd>
+          <dt>O que isso indica</dt>
+          <dd>O efeito real é pequeno, cerca de {fmt(abs(deslocamento), 2)} desvio no log: com
+          {N_POR_GRUPO} PRs por grupo, a simulação do cenário principal dá ao {mw} só
+          {fmt(100 * poder[mw], 0)}% de chance de detectá-lo, e ao {welch}, {fmt(100 * poder[welch], 0)}%.
+          Não rejeitar H₀ na amostra não mostra que o bot é indiferente, só que ela é pequena demais.</dd>
+        </dl>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    simbolos = {welch: "t", mw: "U"}
+    abreviacoes = {"g de Hedges": "g", "rank-biserial": "r"}
+    linhas = {
+        "Estatística": lambda r, t: (
+            f"<span class='unit'>{simbolos[t]}</span> {fmt(r.loc[t, 'estatistica'], 2 if t == welch else 1)}"
+        ),
+        "P-valor": p,
+        "Tamanho do efeito": lambda r, t: (
+            f"<span class='unit'>{abreviacoes[r.loc[t, 'medida_efeito']]}</span> {efeito(r, t)}"
+        ),
+        "Com bot, o merge é": lambda r, t: (
+            f"<span class='txt'>{'mais lento' if r.loc[t, 'efeito'] > 0 else 'mais rápido'}</span>"
+        ),
+        f"Conclusão (α = {fmt(ALPHA, 2)})": lambda r, t: (
+            f"<span class='badge{' badge-on' if r.loc[t, 'rejeita_h0'] else ''}'>"
+            f"{maiuscula(decisao(r, t))}</span>"
+        ),
+    }
+
+    def tabela(titulo: str, r: pd.DataFrame) -> str:
+        corpo = "".join(
+            f"<tr><th>{rotulo}</th>" + "".join(f"<td>{celula(r, t)}</td>" for t in (welch, mw)) + "</tr>"
+            for rotulo, celula in linhas.items()
+        )
+        return (
+            f"<div class='table-scroll'><table class='stats-table result-table'><caption>{titulo}</caption>"
+            f"<thead><tr><th></th><th>{welch}</th><th>{mw}</th></tr></thead><tbody>{corpo}</tbody></table></div>"
+        )
+
+    st.markdown(
+        f"""
+        <div class="tables-pair">
+          {tabela(f"Amostra do laboratório ({n_sem} + {n_com} PRs)", amostra)}
+          {tabela(f"Todos os elegíveis ({n_sem_el} + {n_com_el} PRs)", elegiveis)}
+        </div>
+        <p class="table-note">g de Hedges (Welch) e r rank-biserial (Mann-Whitney): valores positivos
+        indicam tempos maiores com bot. A amostra foi sorteada dos elegíveis com a semente {SEED}.</p>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 # Seções já escritas; as demais mostram o aviso de pendente
 CONTEUDOS = {
     "cenario": conteudo_cenario,
     "dados": conteudo_dados,
     "testes": conteudo_testes,
     "erro-tipo-1": conteudo_erro_tipo_1,
+    "dados-reais": conteudo_dados_reais,
 }
 
 
