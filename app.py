@@ -26,11 +26,13 @@ from src.config import (
     get_rng,
 )
 from src.descritiva import ARQUIVO_AMOSTRA, carregar_amostra, descritiva
-from src.graficos import fmt, g1_real_simulado, g2_estatistica_h0, g3_erro_tipo_1
+from src.graficos import PODER_ALVO, fmt, g1_real_simulado, g2_estatistica_h0, g3_erro_tipo_1, g4_poder
 from src.monte_carlo import (
     ARQUIVO_SIMULACOES,
     FAIXA_ACEITAVEL,
+    Z_95,
     carregar_simulacoes,
+    efeito_para_poder,
     erro_tipo_1,
     gerar_lote_da_configuracao,
 )
@@ -311,26 +313,24 @@ def conteudo_dados() -> None:
         f"""
         <dl class="facts">
           <dt>O que o gráfico mostra</dt>
-          <dd>Cada linha é um grupo: à esquerda, os {n_grupo} PRs reais; à direita, {n_grupo} PRs
-          de um conjunto simulado com efeito zero, em que os dois grupos vêm do mesmo gerador e
-          as diferenças entre eles são puro acaso.</dd>
+          <dd>À esquerda, os {n_grupo} PRs reais de cada grupo; à direita, {n_grupo} PRs simulados
+          com efeito zero, em que as diferenças entre os grupos são puro acaso.</dd>
           <dt>Forma dos dados</dt>
-          <dd>Reais e simulados são muito assimétricos e têm outliers: a mediana fica abaixo de
-          1 h, a assimetria vai de {intervalo(real_sem["assimetria"], real_com["assimetria"])} nos
-          reais e de {intervalo(sim_sem["assimetria"], sim_com["assimetria"])} nos simulados, e os
-          outliers são {intervalo(real_sem["outliers_pct"], real_com["outliers_pct"], 0)}% dos
-          reais e {intervalo(sim_sem["outliers_pct"], sim_com["outliers_pct"], 0)}% dos simulados.</dd>
+          <dd>Os dois são muito assimétricos, com mediana abaixo de 1 h: a assimetria vai de
+          {intervalo(real_sem["assimetria"], real_com["assimetria"])} nos reais e de
+          {intervalo(sim_sem["assimetria"], sim_com["assimetria"])} nos simulados, e os outliers são
+          {intervalo(real_sem["outliers_pct"], real_com["outliers_pct"], 0)}% e
+          {intervalo(sim_sem["outliers_pct"], sim_com["outliers_pct"], 0)}% dos PRs.</dd>
           <dt>Parâmetros da simulação</dt>
-          <dd>Usamos uma <b>mistura de duas lognormais</b>, ajustada por EM aos {len(elegiveis)}
-          PRs elegíveis, porque o tempo até o merge tem dois picos (merges rápidos e lentos) e
-          uma lognormal simples subestima a cauda: o P90 dela é de {fmt(p90["Lognormal simples"], 0)} h,
-          contra {fmt(p90["Elegíveis"], 0)} h nos dados e {fmt(p90["Mistura"], 0)} h na mistura.</dd>
+          <dd>Simulamos uma <b>mistura de duas lognormais</b> ajustada aos {len(elegiveis)} PRs
+          elegíveis, porque o tempo tem dois picos (merges rápidos e lentos) e a lognormal simples
+          subestima a cauda: P90 de {fmt(p90["Lognormal simples"], 0)} h, contra
+          {fmt(p90["Elegíveis"], 0)} h nos dados e {fmt(p90["Mistura"], 0)} h na mistura.</dd>
           <dt>Real × simulado</dt>
-          <dd>Os conjuntos simulados têm mais PRs lentos do que os reais (média de
-          {intervalo(sim_sem["media_h"], sim_com["media_h"])} h, contra
-          {intervalo(real_sem["media_h"], real_com["media_h"])} h) porque a amostra real quase não
-          pegou a cauda: seu máximo é de {fmt(max(real_sem["max_h"], real_com["max_h"]), 0)} h,
-          contra {fmt(elegiveis.max(), 0)} h entre os elegíveis, de onde calibramos a simulação.</dd>
+          <dd>Os simulados têm mais PRs lentos (média de {intervalo(sim_sem["media_h"], sim_com["media_h"])} h,
+          contra {intervalo(real_sem["media_h"], real_com["media_h"])} h) porque a amostra real quase não
+          pegou a cauda: seu máximo é de {fmt(max(real_sem["max_h"], real_com["max_h"]), 0)} h, contra
+          {fmt(elegiveis.max(), 0)} h entre os elegíveis.</dd>
         </dl>
         """,
         unsafe_allow_html=True,
@@ -464,24 +464,22 @@ def conteudo_testes() -> None:
         f"""
         <dl class="facts">
           <dt>O que cada teste compara</dt>
-          <dd>O <b>{welch}</b> compara as médias dos grupos, em erros-padrão; o <b>{mw}</b> compara
-          os postos: o U conta em quantos dos {fmt(N_EXEMPLO ** 2, 0)} pares (com bot, sem bot) o PR
-          com bot demorou mais, e cada empate vale meio.</dd>
+          <dd>O <b>{welch}</b> compara as médias dos grupos, em erros-padrão; o <b>{mw}</b> conta em
+          quantos dos {fmt(N_EXEMPLO ** 2, 0)} pares (com bot, sem bot) o PR com bot demorou mais (U),
+          e cada empate vale meio.</dd>
           <dt>Região de rejeição</dt>
-          <dd>Como o teste é bicaudal, α = {fmt(100 * ALPHA, 0)}% se divide entre as duas pontas da
-          curva, onde ficam os valores que seriam raros se H₀ fosse verdadeira: |t| &gt;
-          {fmt(t_critico, 2)} e U fora de {fmt(u_menor, 0)} a {fmt(u_maior, 0)}.</dd>
+          <dd>Como o teste é bicaudal, os {fmt(100 * ALPHA, 0)}% de α se dividem entre as duas pontas
+          da curva: rejeita-se H₀ se |t| &gt; {fmt(t_critico, 2)} ou se U ficar fora de
+          {fmt(u_menor, 0)} a {fmt(u_maior, 0)}.</dd>
           <dt>P-valor do exemplo</dt>
-          <dd>No exemplo, com {N_EXEMPLO} PRs por grupo e tempos com bot {fmt(multiplicador, 1)} vezes
-          maiores, a área hachurada é a chance de um resultado tão ou mais extremo se H₀ fosse
-          verdadeira, e não a probabilidade de H₀ ser verdadeira:
-          {fmt(100 * exemplo.loc[welch, "p_valor"], 1)}% no {welch}, que não rejeita H₀ e comete um
-          erro tipo II, e {fmt(100 * exemplo.loc[mw, "p_valor"], 1)}% no {mw}, que rejeita.</dd>
+          <dd>Com tempos {fmt(multiplicador, 1)} vezes maiores com bot, a área hachurada (a chance de um
+          resultado tão extremo se H₀ fosse verdadeira, não a de H₀ ser verdadeira) é de
+          {fmt(100 * exemplo.loc[welch, "p_valor"], 1)}% no {welch}, que comete um erro tipo II, e de
+          {fmt(100 * exemplo.loc[mw, "p_valor"], 1)}% no {mw}, que rejeita H₀.</dd>
           <dt>Curva × simulação</dt>
-          <dd>As barras mostram {fmt(N_SIMULACOES, 0)} conjuntos sem efeito: o U acompanha a curva,
-          mas o t forma dois picos perto de ±1, porque o PR mais lento domina a média e a variância
-          do próprio grupo, e só {fmt(rejeicoes[welch], 1)}% dos conjuntos rejeitam H₀ no {welch},
-          contra {fmt(rejeicoes[mw], 1)}% no {mw}.</dd>
+          <dd>Nos {fmt(N_SIMULACOES, 0)} conjuntos sem efeito (barras), o U segue a curva, mas o t forma
+          dois picos perto de ±1, porque o PR mais lento domina a média e a variância do grupo, e só
+          {fmt(rejeicoes[welch], 1)}% rejeitam H₀ no {welch}, contra {fmt(rejeicoes[mw], 1)}% no {mw}.</dd>
         </dl>
         """,
         unsafe_allow_html=True,
@@ -553,25 +551,22 @@ def conteudo_erro_tipo_1() -> None:
         <dl class="facts">
           <dt>O que o gráfico mostra</dt>
           <dd>Cada ponto é a proporção de p &lt; {fmt(ALPHA, 2)} em {fmt(N_SIMULACOES, 0)} conjuntos
-          sem efeito, com a margem de erro de 95%: como H₀ é verdadeira, toda rejeição é um erro
-          tipo I, e o esperado é ficar perto da linha de {fmt(100 * ALPHA, 0)}%.</dd>
+          sem efeito, com margem de erro de 95%: como H₀ é verdadeira, toda rejeição é erro tipo I, e
+          o esperado é ficar perto de {fmt(100 * ALPHA, 0)}%.</dd>
           <dt>{mw}</dt>
           <dd>Ficou perto de {fmt(100 * ALPHA, 0)}% em todas as situações
-          ({fmt(100 * taxas_mw.min(), 1)}% a {fmt(100 * taxas_mw.max(), 1)}%), porque sob H₀ os postos
-          têm a mesma distribuição qualquer que seja a forma dos dados; os
-          {taxa("normal", mw)} do controle são acaso, já que a taxa exata é de
-          {fmt(100 * exato_30, 1)}%.</dd>
+          ({fmt(100 * taxas_mw.min(), 1)}% a {fmt(100 * taxas_mw.max(), 1)}%), porque, sob H₀, os postos
+          têm a mesma distribuição qualquer que seja a forma dos dados.</dd>
           <dt>{welch}</dt>
-          <dd>Foi quem se desviou: ficou perto de {fmt(100 * ALPHA, 0)}% no controle
-          ({taxa("normal")}) e com outliers ({taxa("outliers")}), mas foi <b>conservador</b> com
-          assimetria forte ({taxa("mistura")} no cenário principal, {taxa("lognormal")} na lognormal e
-          {taxa("amostra_pequena")} com amostra pequena), pois um PR muito lento infla o desvio do
-          próprio grupo e o t raramente chega à região de rejeição.</dd>
+          <dd>Ficou perto de {fmt(100 * ALPHA, 0)}% no controle ({taxa("normal")}) e com outliers
+          ({taxa("outliers")}), mas foi <b>conservador</b> com assimetria forte ({taxa("mistura")} no
+          cenário principal, {taxa("lognormal")} na lognormal e {taxa("amostra_pequena")} com amostra
+          pequena), porque um PR muito lento infla o desvio do próprio grupo.</dd>
           <dt>Grupos desiguais</dt>
           <dd>Os {taxa("desbalanceado")} do {welch} escondem outro desvio:
           {int(desigual["rejeicoes_com_bot_maior"])} das {int(desigual["rejeicoes"])} rejeições apontam
-          merge mais lento com bot, em vez de se dividirem entre os dois lados, porque elas ocorrem
-          quando o grupo menor fica sem PRs lentos.</dd>
+          merge mais lento com bot, em vez de se dividirem entre os lados, porque ocorrem quando o
+          grupo menor fica sem PRs lentos.</dd>
         </dl>
         """,
         unsafe_allow_html=True,
@@ -617,6 +612,128 @@ def conteudo_erro_tipo_1() -> None:
     )
 
 
+def curvas_poder() -> pd.DataFrame:
+    """Proporção de rejeições a α = ALPHA, indexada por situação, teste e efeito."""
+    sim = simulacoes()
+    return sim[sim["alpha"] == ALPHA].set_index(["situacao", "teste", "efeito"])
+
+
+def poder(situacao: str, teste: str, efeito: float = EFEITO_EXEMPLO) -> float:
+    return curvas_poder().loc[(situacao, teste, efeito), "proporcao"]
+
+
+def efeitos_simulados() -> list[float]:
+    return sorted(curvas_poder().index.get_level_values("efeito").unique())
+
+
+def vantagem_welch(situacao: str) -> pd.Series:
+    """Poder do Welch menos o do Mann-Whitney, por efeito, sem o efeito zero."""
+    return pd.Series({
+        e: poder(situacao, TESTE_PARAMETRICO, e) - poder(situacao, TESTE_NAO_PARAMETRICO, e)
+        for e in efeitos_simulados()
+        if e > 0
+    })
+
+
+def vantagem_welch_no_controle() -> tuple[float, float, bool]:
+    """Maior vantagem do Welch no controle normal, o efeito em que ocorre e se supera a margem de erro."""
+    vantagem = vantagem_welch("normal")
+    efeito = vantagem.idxmax()
+    margem = np.hypot(*(
+        curvas_poder().loc[("normal", t, efeito), "margem_erro"] for t in (TESTE_PARAMETRICO, TESTE_NAO_PARAMETRICO)
+    ))
+    return float(vantagem.max()), float(efeito), bool(vantagem.max() > margem)
+
+
+def efeito_real() -> float:
+    """Deslocamento observado nos elegíveis, em módulo, na unidade do efeito simulado."""
+    return abs(testes_reais()["Elegíveis"][3])
+
+
+def poder_no_efeito_real(teste: str) -> float:
+    efeitos = efeitos_simulados()
+    return float(np.interp(efeito_real(), efeitos, [poder(SITUACAO_EXEMPLO, teste, e) for e in efeitos]))
+
+
+def conteudo_poder() -> None:
+    welch = TESTE_PARAMETRICO
+    mw = TESTE_NAO_PARAMETRICO
+    sim = simulacoes()
+    sim = sim[sim["alpha"] == ALPHA]
+
+    with st.container(key="grafico-g4"):
+        st.plotly_chart(g4_poder(sim, ALPHA, efeito_real()), theme=None, config={"displayModeBar": False})
+
+    curvas = curvas_poder()
+    efeitos = efeitos_simulados()
+    vantagem_normal, _, welch_ganha = vantagem_welch_no_controle()
+    outliers = vantagem_welch("outliers")
+    maximo_welch = sim[(sim["situacao"] == SITUACAO_EXEMPLO) & (sim["teste"] == welch)]["proporcao"].max()
+    multiplicador = np.exp(EFEITO_EXEMPLO * calibrar().sigma)
+
+    st.markdown(
+        f"""
+        <dl class="facts">
+          <dt>O que o gráfico mostra</dt>
+          <dd>Cada ponto é a proporção de {fmt(N_SIMULACOES, 0)} conjuntos com p &lt; {fmt(ALPHA, 2)}
+          quando o efeito existe (no efeito zero, é o erro tipo I da seção 4), e a linha tracejada
+          marca {fmt(100 * PODER_ALVO, 0)}%, o poder usual de referência.</dd>
+          <dt>Quem detecta melhor</dt>
+          <dd>O <b>{mw}</b>, em todas as violações: no cenário principal, com tempos
+          {fmt(multiplicador, 1)} vezes maiores com bot, ele detecta o efeito em
+          {fmt(100 * poder(SITUACAO_EXEMPLO, mw), 0)}% dos conjuntos, contra
+          {fmt(100 * poder(SITUACAO_EXEMPLO, welch), 0)}% do {welch}, que não passa de
+          {fmt(100 * maximo_welch, 0)}% nem com o maior efeito.</dd>
+          <dt>Onde a vantagem muda de lado</dt>
+          <dd>Só no controle normal, em que os pressupostos do {welch} valem, ele supera o {mw}, por até
+          {fmt(100 * vantagem_normal, 1)} pontos ({"acima" if welch_ganha else "dentro"} da margem de erro);
+          com outliers, o {mw} ainda ganha, mas por no máximo {fmt(-100 * outliers.min(), 1)} pontos.</dd>
+          <dt>E nos dados reais</dt>
+          <dd>No efeito observado nos elegíveis ({fmt(efeito_real(), 2)}, linha pontilhada), as curvas
+          mal saem do chão: com {N_POR_GRUPO} PRs por grupo, o poder é de
+          {fmt(100 * poder_no_efeito_real(mw), 0)}% no {mw} e {fmt(100 * poder_no_efeito_real(welch), 0)}%
+          no {welch}.</dd>
+        </dl>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    def celula_efeito(situacao: str, teste: str) -> str:
+        curva = sim[(sim["situacao"] == situacao) & (sim["teste"] == teste)]
+        efeito = efeito_para_poder(curva, PODER_ALVO)
+        if efeito is None:
+            return f"<span class='txt'>Não chega (máx. {fmt(100 * curva['proporcao'].max(), 0)}%)</span>"
+        return f"{fmt(efeito, 2)} <span class='unit'>× {fmt(np.exp(efeito * calibrar().sigma), 1)}</span>"
+
+    def tabela(titulo: str, celula) -> str:
+        corpo = "".join(
+            f"<tr><th>{s.nome}</th>" + "".join(f"<td>{celula(chave, t)}</td>" for t in (welch, mw)) + "</tr>"
+            for chave, s in SITUACOES.items()
+        )
+        return (
+            f"<div class='table-scroll'><table class='stats-table result-table'><caption>{titulo}</caption>"
+            f"<thead><tr><th>Situação</th><th>{welch}</th><th>{mw}</th></tr></thead><tbody>{corpo}</tbody></table></div>"
+        )
+
+    def celula_poder(situacao: str, teste: str) -> str:
+        linha = curvas.loc[(situacao, teste, EFEITO_EXEMPLO)]
+        return f"{fmt(100 * linha['proporcao'], 1)}% <span class='unit'>± {fmt(100 * linha['margem_erro'], 1)}</span>"
+
+    st.markdown(
+        f"""
+        <div class="tables-pair">
+          {tabela(f"Poder com efeito {fmt(EFEITO_EXEMPLO, 1)} (tempos × {fmt(multiplicador, 1)})", celula_poder)}
+          {tabela(f"Efeito necessário para {fmt(100 * PODER_ALVO, 0)}% de poder", celula_efeito)}
+        </div>
+        <p class="table-note">O efeito é o deslocamento do grupo com bot no log dos tempos, em desvios;
+        o multiplicador ao lado é quantas vezes os tempos crescem. O efeito para {fmt(100 * PODER_ALVO, 0)}%
+        é interpolado entre os {len(efeitos)} efeitos simulados, e a margem é de 95%. Em "Amostra pequena",
+        são {N_PEQUENO} PRs por grupo; nas demais, {N_POR_GRUPO}.</p>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def com_sinal(x: float, casas: int = 2) -> str:
     return f"+{fmt(x, casas)}" if x > 0 else fmt(x, casas)
 
@@ -637,12 +754,7 @@ def conteudo_dados_reais() -> None:
     amostra, n_sem, n_com, _ = reais["Amostra"]
     elegiveis, n_sem_el, n_com_el, deslocamento = reais["Elegíveis"]
 
-    # Poder com o efeito dos elegíveis e o tamanho da amostra, interpolado entre os efeitos simulados
-    sim = simulacoes()
-    sim = sim[(sim["situacao"] == SITUACAO_EXEMPLO) & (sim["alpha"] == ALPHA)]
-    poder = {
-        t: np.interp(abs(deslocamento), g["efeito"], g["proporcao"]) for t, g in sim.groupby("teste")
-    }
+    poder_real = {t: poder_no_efeito_real(t) for t in (welch, mw)}
 
     def p(resultados: pd.DataFrame, teste: str) -> str:
         return fmt(resultados.loc[teste, "p_valor"], 3)
@@ -663,14 +775,14 @@ def conteudo_dados_reais() -> None:
           e o {welch} não vê diferença (p = {p(amostra, welch)}).</dd>
           <dt>Todos os elegíveis</dt>
           <dd>Com os {n_sem_el + n_com_el} PRs, o {mw} {decisao(elegiveis, mw)} (p = {p(elegiveis, mw)}),
-          {"mas na direção oposta à da amostra" if oposta else "na mesma direção da amostra"}:
-          r = {efeito(elegiveis, mw)}, {direcao(elegiveis.loc[mw, "efeito"])}. O {welch}
+          {"mas na direção oposta à da amostra" if oposta else "na mesma direção da amostra"}
+          (r = {efeito(elegiveis, mw)}, {direcao(elegiveis.loc[mw, "efeito"])}), e o {welch}
           {decisao(elegiveis, welch)} (p = {p(elegiveis, welch)}).</dd>
           <dt>O que isso indica</dt>
           <dd>O efeito real é pequeno, cerca de {fmt(abs(deslocamento), 2)} desvio no log: com
-          {N_POR_GRUPO} PRs por grupo, a simulação do cenário principal dá ao {mw} só
-          {fmt(100 * poder[mw], 0)}% de chance de detectá-lo, e ao {welch}, {fmt(100 * poder[welch], 0)}%.
-          Não rejeitar H₀ na amostra não mostra que o bot é indiferente, só que ela é pequena demais.</dd>
+          {N_POR_GRUPO} PRs por grupo, a simulação dá ao {mw} só {fmt(100 * poder_real[mw], 0)}% de
+          chance de detectá-lo, e ao {welch}, {fmt(100 * poder_real[welch], 0)}%. Não rejeitar H₀ na
+          amostra não mostra que o bot é indiferente, só que ela é pequena demais.</dd>
         </dl>
         """,
         unsafe_allow_html=True,
@@ -718,13 +830,80 @@ def conteudo_dados_reais() -> None:
     )
 
 
+def conteudo_conclusao() -> None:
+    welch = TESTE_PARAMETRICO
+    mw = TESTE_NAO_PARAMETRICO
+    erro = erro_tipo_1(simulacoes(), ALPHA).set_index(["situacao", "teste"])
+    taxas_mw = erro.xs(mw, level="teste")["proporcao"]
+    curvas = curvas_poder()
+    multiplicador = np.exp(EFEITO_EXEMPLO * calibrar().sigma)
+    vantagem_normal, _, welch_ganha = vantagem_welch_no_controle()
+    amostra = testes_reais()["Amostra"][0]
+
+    # O Welch só "ganha" numa violação se superar o Mann-Whitney além da margem de erro
+    welch_ganha_em_violacao = any(
+        poder(s, welch, e) - poder(s, mw, e)
+        > np.hypot(*(curvas.loc[(s, t, e), "margem_erro"] for t in (welch, mw)))
+        for s in SITUACOES
+        if s != "normal"
+        for e in efeitos_simulados()
+        if e > 0
+    )
+    rejeicoes_amostra = int(amostra["rejeita_h0"].sum())
+
+    st.markdown(
+        f"""
+        <div class="hyp">
+          <div>
+            <span class="hyp-label">Antes de simular</span>
+            <p>Esperávamos que o <b>{mw}</b> se saísse melhor, porque os tempos até o merge são
+            assimétricos e têm outliers, que inflam a variância e tiram poder do {welch}.</p>
+          </div>
+          <div>
+            <span class="hyp-label">Depois de simular</span>
+            <p>A expectativa se confirmou, com mais folga do que prevíamos: no cenário principal, com
+            tempos {fmt(multiplicador, 1)} vezes maiores com bot, o {mw} detecta o efeito em
+            {fmt(100 * poder(SITUACAO_EXEMPLO, mw), 0)}% dos conjuntos, contra
+            {fmt(100 * poder(SITUACAO_EXEMPLO, welch), 0)}% do {welch}.</p>
+          </div>
+        </div>
+
+        <dl class="facts">
+          <dt>O que não prevíamos</dt>
+          <dd>Sob H₀, o {welch} não erra mais do que promete, e sim menos:
+          {fmt(100 * erro.loc[(SITUACAO_EXEMPLO, welch), "proporcao"], 1)}% de erro tipo I no cenário
+          principal, em vez de {fmt(100 * ALPHA, 0)}%, um teste conservador que paga essa cautela em
+          poder (seções 4 e 5).</dd>
+          <dt>Recomendação</dt>
+          <dd><b>Usar o {mw}</b> para comparar tempos até o merge: ele manteve o erro tipo I entre
+          {fmt(100 * taxas_mw.min(), 1)}% e {fmt(100 * taxas_mw.max(), 1)}% em todas as situações e
+          {"não perdeu poder em nenhuma violação" if not welch_ganha_em_violacao
+           else "teve mais poder na maior parte das violações"}.</dd>
+          <dt>Quando a escolha mudaria</dt>
+          <dd>O {welch} só passa à frente com dados próximos da normal, como o log dos tempos no controle,
+          e mesmo assim por até {fmt(100 * vantagem_normal, 1)}
+          {"pontos" if welch_ganha else "pontos, dentro da margem de erro"}; ele também é a escolha se a pergunta for
+          sobre a média em horas, como o tempo total de espera, que o {mw}, por comparar postos, não testa.</dd>
+          <dt>E nos dados reais</dt>
+          <dd>{"Nenhum teste rejeita" if rejeicoes_amostra == 0 else "Só parte dos testes rejeita"} H₀ na
+          amostra de {N_POR_GRUPO} PRs por grupo, mas, com o efeito observado, o {mw} teria só
+          {fmt(100 * poder_no_efeito_real(mw), 0)}% de poder (seção 6); e, como a comparação é antes ×
+          depois da adoção, mesmo uma diferença não poderia ser atribuída só ao bot.</dd>
+        </dl>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 # Seções já escritas; as demais mostram o aviso de pendente
 CONTEUDOS = {
     "cenario": conteudo_cenario,
     "dados": conteudo_dados,
     "testes": conteudo_testes,
     "erro-tipo-1": conteudo_erro_tipo_1,
+    "poder": conteudo_poder,
     "dados-reais": conteudo_dados_reais,
+    "conclusao": conteudo_conclusao,
 }
 
 

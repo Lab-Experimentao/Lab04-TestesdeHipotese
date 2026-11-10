@@ -217,6 +217,21 @@ html, body, .stApp, .stMarkdown, button, input {
   color: var(--text);
 }
 .situations-table th.num { text-align: right; }
+/* Resultados dos testes (seção 6): números em mono, textos e selos na fonte do corpo */
+.result-table td { vertical-align: middle; }
+.result-table .unit { font-family: "Inter", system-ui, sans-serif; font-style: italic; color: var(--muted); margin-right: .2rem; }
+.result-table .txt { font-family: "Inter", system-ui, sans-serif; }
+.badge {
+  display: inline-block;
+  padding: .15rem .55rem;
+  border-radius: 999px;
+  background: var(--soft);
+  color: var(--muted);
+  font-family: "Inter", system-ui, sans-serif;
+  font-size: .8rem;
+  font-weight: 500;
+}
+.badge-on { background: #fdecec; color: #b91c1c; font-weight: 600; }
 .table-note { margin: 0; font-size: .85rem; line-height: 1.55; color: var(--muted); }
 .facts { margin-bottom: 1.5rem; }
 .tables-pair {
