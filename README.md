@@ -23,6 +23,11 @@ streamlit run app.py
 
 O dashboard abre em <http://localhost:8501>.
 
+**Bônus:** no fim da seção 5 (Poder), o bloco "Explore o poder" tem controles para o número de PRs
+por grupo, o tamanho do efeito, a situação simulada e o α. O poder dos dois testes é recalculado na
+hora (2.000 conjuntos por ponto), com as curvas de poder × efeito e poder × n e o n necessário para
+80% de poder.
+
 ## Dados reais
 
 Tempo até o merge de 30 PRs por grupo do [TryGhost/Ghost](https://github.com/TryGhost/Ghost),

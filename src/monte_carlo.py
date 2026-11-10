@@ -34,6 +34,11 @@ FAIXA_ACEITAVEL = (0.5, 1.5)
 # Acima desta parcela das rejeições numa só direção, o erro não está dividido entre as caudas
 LIMITE_UMA_DIRECAO = 0.75
 
+# Gráfico interativo (bônus): menos repetições, para responder enquanto o controle se move
+N_SIMULACOES_INTERATIVO = 2_000
+N_INTERATIVOS = (5, 10, 15, 20, 30, 40, 50, 75, 100, 150, 200)
+EFEITOS_INTERATIVOS = tuple(round(0.125 * i, 3) for i in range(17))
+
 
 def rng_da_configuracao(situacao: str, efeito: float) -> np.random.Generator:
     # crc32 em vez de hash(): o hash de textos muda a cada execução do Python
@@ -135,20 +140,53 @@ def erro_tipo_1(simulacoes: pd.DataFrame, alpha: float = ALPHA) -> pd.DataFrame:
     return linhas
 
 
-def efeito_para_poder(curva: pd.DataFrame, alvo: float) -> float | None:
-    """Menor efeito em que a curva de poder chega ao alvo, interpolado entre os efeitos simulados.
+def valor_para_poder(curva: pd.DataFrame, alvo: float, coluna: str) -> float | None:
+    """Menor valor de coluna em que a curva de poder chega ao alvo, interpolado entre os simulados.
 
-    curva: linhas de um teste numa situação e num α, com efeito e proporcao. None se não chega.
+    curva: linhas de um teste numa situação e num α, com coluna e proporcao. None se não chega.
     """
-    curva = curva.sort_values("efeito")
-    efeitos, poder = curva["efeito"].to_numpy(), curva["proporcao"].to_numpy()
+    curva = curva.sort_values(coluna)
+    valores, poder = curva[coluna].to_numpy(), curva["proporcao"].to_numpy()
     acima = np.flatnonzero(poder >= alvo)
     if not len(acima):
         return None
     i = acima[0]
     if i == 0:
-        return float(efeitos[0])
-    return float(efeitos[i - 1] + (alvo - poder[i - 1]) * (efeitos[i] - efeitos[i - 1]) / (poder[i] - poder[i - 1]))
+        return float(valores[0])
+    return float(valores[i - 1] + (alvo - poder[i - 1]) * (valores[i] - valores[i - 1]) / (poder[i] - poder[i - 1]))
+
+
+def efeito_para_poder(curva: pd.DataFrame, alvo: float) -> float | None:
+    """Menor efeito em que a curva de poder chega ao alvo, interpolado entre os efeitos simulados."""
+    return valor_para_poder(curva, alvo, "efeito")
+
+
+def poder_interativo(
+    situacao: str,
+    n: int,
+    efeito: float,
+    n_simulacoes: int = N_SIMULACOES_INTERATIVO,
+) -> pd.DataFrame:
+    """Rejeições de cada teste, a ALPHA e a ALPHA_ESTRITO, para um n por grupo e um efeito quaisquer.
+
+    A semente depende só da situação e de n: para um mesmo n, todos os efeitos usam os mesmos
+    sorteios (números aleatórios comuns), e a curva de poder fica lisa em vez de serrilhada.
+    """
+    rng = get_rng(np.random.SeedSequence([SEED, zlib.crc32(situacao.encode()), n]))
+    sem_bot, com_bot = gerar_lote(n_simulacoes, n, efeito, situacao, rng)
+    linhas = []
+    for teste, resultado in testes_em_lote(sem_bot, com_bot).items():
+        for alpha in (ALPHA, ALPHA_ESTRITO):
+            proporcao = (resultado["p_valor"] < alpha).mean()
+            linhas.append({
+                "n": n,
+                "efeito": efeito,
+                "teste": teste,
+                "alpha": alpha,
+                "proporcao": proporcao,
+                "margem_erro": Z_95 * np.sqrt(proporcao * (1 - proporcao) / n_simulacoes),
+            })
+    return pd.DataFrame(linhas)
 
 
 def main() -> None:

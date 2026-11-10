@@ -35,8 +35,9 @@ ALCANCE_G2 = 4
 BINS_POR_DESVIO_G2 = 4
 PONTOS_CURVA = 400
 
-# Fim do eixo x do G3 (%) e distância de cada teste ao centro da linha da situação
-FIM_X_G3 = 8
+# Fim do eixo x do G3 em múltiplos de α (8% com α = 0,05) e distância de cada teste ao centro da
+# linha da situação
+FIM_X_G3_EM_ALPHA = 1.6
 DESLOCAMENTO_G3 = {TESTE_PARAMETRICO: -0.16, TESTE_NAO_PARAMETRICO: 0.16}
 SIMBOLOS_G3 = {TESTE_PARAMETRICO: "circle", TESTE_NAO_PARAMETRICO: "diamond"}
 
@@ -407,6 +408,9 @@ def g3_erro_tipo_1(erro: pd.DataFrame, alpha: float) -> go.Figure:
     posicoes = {situacao: i for i, situacao in enumerate(SITUACOES)}
     limites_y = [-0.5, len(posicoes) - 0.5]
     faixa = [100 * alpha * limite for limite in FAIXA_ACEITAVEL]
+    # O eixo acompanha α: com α = 0,01, uma escala de 0 a 8% espremeria todos os pontos perto do zero
+    fim_x = 100 * alpha * FIM_X_G3_EM_ALPHA
+    casas = 1 if alpha >= 0.05 else 2
 
     fig = go.Figure()
     fig.add_trace(
@@ -471,7 +475,7 @@ def g3_erro_tipo_1(erro: pd.DataFrame, alpha: float) -> go.Figure:
                 fig.add_annotation(
                     x=100 * (p + m),
                     y=posicao,
-                    text=f"{fmt(100 * p, 1)}%",
+                    text=f"{fmt(100 * p, casas)}%",
                     showarrow=False,
                     xanchor="left",
                     xshift=8,
@@ -480,7 +484,7 @@ def g3_erro_tipo_1(erro: pd.DataFrame, alpha: float) -> go.Figure:
 
     for linha in erro[~erro["h0_verdadeira"]].itertuples():
         fig.add_annotation(
-            x=0.1,
+            x=fim_x / 80,
             y=posicoes[linha.situacao] + DESLOCAMENTO_G3[linha.teste],
             text=f"{linha.teste}: H₀ falsa aqui, não é erro tipo I",
             showarrow=False,
@@ -490,8 +494,8 @@ def g3_erro_tipo_1(erro: pd.DataFrame, alpha: float) -> go.Figure:
 
     fig.update_xaxes(
         title_text=f"Erro tipo I (% de conjuntos sem efeito com p < {fmt(alpha, 2)})",
-        range=[0, FIM_X_G3],
-        dtick=1,
+        range=[0, fim_x],
+        dtick=fim_x / 8,
         ticksuffix="%",
         ticks="outside",
         tickcolor=COR_GRADE,
@@ -523,6 +527,147 @@ def g3_erro_tipo_1(erro: pd.DataFrame, alpha: float) -> go.Figure:
         font={"family": FONTE, "size": 12, "color": COR_SUAVE},
         height=560,
         margin={"l": 210, "r": 24, "t": 56, "b": 88},
+        separators=",.",
+        paper_bgcolor="#ffffff",
+        plot_bgcolor="#ffffff",
+        hoverlabel={"font_family": FONTE},
+    )
+    fig.update_annotations(font_family=FONTE)
+    return fig
+
+
+def poder_interativo(
+    por_efeito: pd.DataFrame,
+    por_n: pd.DataFrame,
+    n: int,
+    efeito: float,
+    multiplicador: float,
+    alpha: float,
+) -> go.Figure:
+    """Bônus: poder × efeito (no n escolhido) e poder × n (no efeito escolhido), lado a lado.
+
+    por_efeito e por_n: linhas de poder_interativo de src.monte_carlo, já filtradas pelo α, que
+    incluem o n e o efeito escolhidos. O ponto escolhido aparece destacado nos dois painéis.
+    """
+    paineis = [
+        ("efeito", por_efeito, efeito, f"Poder × efeito, com n = {n} PRs por grupo"),
+        ("n", por_n, n, f"Poder × n, com efeito {fmt(efeito, 2)} (tempos × {fmt(multiplicador, 2)})"),
+    ]
+    fig = make_subplots(
+        rows=1,
+        cols=len(paineis),
+        shared_yaxes=True,
+        horizontal_spacing=0.06,
+        subplot_titles=[titulo for *_, titulo in paineis],
+    )
+
+    for coluna, (eixo, dados, escolhido, _) in enumerate(paineis, start=1):
+        for teste, cor in CORES_TESTES.items():
+            curva = dados[dados["teste"] == teste].sort_values(eixo)
+            ponto = curva[np.isclose(curva[eixo], escolhido)]
+            fig.add_trace(
+                go.Scatter(
+                    x=curva[eixo],
+                    y=100 * curva["proporcao"],
+                    mode="lines",
+                    name=teste,
+                    legendgroup=teste,
+                    showlegend=coluna == 1,
+                    line={"color": cor, "width": 2},
+                    customdata=[
+                        (fmt(v, 2 if eixo == "efeito" else 0), fmt(100 * p, 1), fmt(100 * m, 1))
+                        for v, p, m in zip(curva[eixo], curva["proporcao"], curva["margem_erro"])
+                    ],
+                    hovertemplate=(
+                        ("Efeito %{customdata[0]}" if eixo == "efeito" else "%{customdata[0]} PRs por grupo")
+                        + f"<br>Poder %{{customdata[1]}}% ± %{{customdata[2]}}<extra>{teste}</extra>"
+                    ),
+                ),
+                row=1,
+                col=coluna,
+            )
+            fig.add_trace(
+                go.Scatter(
+                    x=ponto[eixo],
+                    y=100 * ponto["proporcao"],
+                    mode="markers",
+                    showlegend=False,
+                    legendgroup=teste,
+                    marker={
+                        "color": cor,
+                        "size": 13,
+                        "symbol": SIMBOLOS_G3[teste],
+                        "line": {"color": "#ffffff", "width": 2},
+                    },
+                    hoverinfo="skip",
+                ),
+                row=1,
+                col=coluna,
+            )
+        fig.add_vline(x=escolhido, row=1, col=coluna, line={"color": COR_SUAVE, "width": 1, "dash": "dot"})
+        fig.add_hline(
+            y=100 * PODER_ALVO,
+            row=1,
+            col=coluna,
+            line={"color": COR_REFERENCIA, "width": 1, "dash": "dash"},
+        )
+
+    fig.add_trace(go.Scatter(
+        x=[None], y=[None], mode="lines", name=f"{fmt(100 * PODER_ALVO, 0)}% de poder",
+        line={"color": COR_REFERENCIA, "width": 1, "dash": "dash"},
+    ))
+    fig.add_trace(go.Scatter(
+        x=[None], y=[None], mode="lines", name="Valor escolhido nos controles",
+        line={"color": COR_SUAVE, "width": 1, "dash": "dot"},
+    ))
+
+    eixo_comum = {
+        "ticks": "outside",
+        "tickcolor": COR_GRADE,
+        "linecolor": COR_GRADE,
+        "showgrid": False,
+        "zeroline": False,
+        "fixedrange": True,
+    }
+    efeito_max = por_efeito["efeito"].max()
+    fig.update_xaxes(
+        title_text="Efeito (desvios no log dos tempos)",
+        range=[-0.05, efeito_max + 0.05],
+        dtick=0.25,
+        row=1,
+        col=1,
+        **eixo_comum,
+    )
+    valores_n = sorted(por_n["n"].unique())
+    fig.update_xaxes(
+        title_text="PRs por grupo (escala log)",
+        type="log",
+        range=[np.log10(valores_n[0]) - 0.05, np.log10(valores_n[-1]) + 0.05],
+        tickvals=[v for v in (5, 10, 20, 30, 50, 100, 200) if valores_n[0] <= v <= valores_n[-1]],
+        row=1,
+        col=2,
+        **eixo_comum,
+    )
+    fig.update_yaxes(
+        range=[0, 105],
+        dtick=20,
+        ticksuffix="%",
+        gridcolor=COR_GRADE,
+        zeroline=False,
+        fixedrange=True,
+    )
+    fig.update_yaxes(title_text="Poder (% de conjuntos com p < α)", col=1)
+    fig.update_layout(
+        title={
+            "text": f"Poder interativo dos dois testes (α = {fmt(alpha, 2)})",
+            "x": 0,
+            "xanchor": "left",
+            "font": {"size": 16, "color": COR_TEXTO},
+        },
+        legend={"orientation": "h", "x": 0, "xanchor": "left", "y": -0.2, "yanchor": "top"},
+        font={"family": FONTE, "size": 12, "color": COR_SUAVE},
+        height=460,
+        margin={"l": 64, "r": 24, "t": 88, "b": 96},
         separators=",.",
         paper_bgcolor="#ffffff",
         plot_bgcolor="#ffffff",
