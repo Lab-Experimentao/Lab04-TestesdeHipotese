@@ -35,8 +35,9 @@ ALCANCE_G2 = 4
 BINS_POR_DESVIO_G2 = 4
 PONTOS_CURVA = 400
 
-# Fim do eixo x do G3 (%) e distância de cada teste ao centro da linha da situação
-FIM_X_G3 = 8
+# Fim do eixo x do G3 em múltiplos de α (8% com α = 0,05) e distância de cada teste ao centro da
+# linha da situação
+FIM_X_G3_EM_ALPHA = 1.6
 DESLOCAMENTO_G3 = {TESTE_PARAMETRICO: -0.16, TESTE_NAO_PARAMETRICO: 0.16}
 SIMBOLOS_G3 = {TESTE_PARAMETRICO: "circle", TESTE_NAO_PARAMETRICO: "diamond"}
 
@@ -407,6 +408,9 @@ def g3_erro_tipo_1(erro: pd.DataFrame, alpha: float) -> go.Figure:
     posicoes = {situacao: i for i, situacao in enumerate(SITUACOES)}
     limites_y = [-0.5, len(posicoes) - 0.5]
     faixa = [100 * alpha * limite for limite in FAIXA_ACEITAVEL]
+    # O eixo acompanha α: com α = 0,01, uma escala de 0 a 8% espremeria todos os pontos perto do zero
+    fim_x = 100 * alpha * FIM_X_G3_EM_ALPHA
+    casas = 1 if alpha >= 0.05 else 2
 
     fig = go.Figure()
     fig.add_trace(
@@ -471,7 +475,7 @@ def g3_erro_tipo_1(erro: pd.DataFrame, alpha: float) -> go.Figure:
                 fig.add_annotation(
                     x=100 * (p + m),
                     y=posicao,
-                    text=f"{fmt(100 * p, 1)}%",
+                    text=f"{fmt(100 * p, casas)}%",
                     showarrow=False,
                     xanchor="left",
                     xshift=8,
@@ -480,7 +484,7 @@ def g3_erro_tipo_1(erro: pd.DataFrame, alpha: float) -> go.Figure:
 
     for linha in erro[~erro["h0_verdadeira"]].itertuples():
         fig.add_annotation(
-            x=0.1,
+            x=fim_x / 80,
             y=posicoes[linha.situacao] + DESLOCAMENTO_G3[linha.teste],
             text=f"{linha.teste}: H₀ falsa aqui, não é erro tipo I",
             showarrow=False,
@@ -490,8 +494,8 @@ def g3_erro_tipo_1(erro: pd.DataFrame, alpha: float) -> go.Figure:
 
     fig.update_xaxes(
         title_text=f"Erro tipo I (% de conjuntos sem efeito com p < {fmt(alpha, 2)})",
-        range=[0, FIM_X_G3],
-        dtick=1,
+        range=[0, fim_x],
+        dtick=fim_x / 8,
         ticksuffix="%",
         ticks="outside",
         tickcolor=COR_GRADE,

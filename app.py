@@ -65,7 +65,6 @@ from src.testes import (
     SITUACAO_EXEMPLO,
     aplicar_testes,
     conjunto_exemplo,
-    erro_tipo_1_exato_mann_whitney,
     referencias_h0,
     testes_em_lote,
 )
@@ -80,6 +79,7 @@ N_CONJUNTOS_ASSIMETRIA = 2_000
 # Gráfico interativo: "Amostra pequena" é a mistura com n fixo, e ali o n já é um controle
 SITUACOES_INTERATIVAS = [s for s in SITUACOES if s != "amostra_pequena"]
 N_MIN_INTERATIVO, N_MAX_INTERATIVO = N_INTERATIVOS[0], N_INTERATIVOS[-1]
+HORAS_POR_ANO = 24 * 365
 
 st.set_page_config(
     page_title="Lab04 - Testes de Hipótese",
@@ -145,15 +145,87 @@ def cabecalho() -> None:
     )
 
 
+# Guia da apresentação: cada uma das 15 perguntas e onde o dashboard a responde (rótulo, âncora)
+GUIA_PERGUNTAS = [
+    ("Cenário, H₀ e H₁ em palavras simples", [("1 · Cenário", "cenario")]),
+    ("Unicaudal ou bicaudal? Por quê?", [("1 · Cenário", "cenario")]),
+    ("Como os dados foram coletados e qual a forma deles", [("1 · Cenário", "cenario")]),
+    ("Como os dados reais definiram a simulação", [("2 · G1", "dados")]),
+    ("O que cada teste compara de fato", [("3 · G2", "testes")]),
+    ("Distribuição sob H₀ e região de rejeição", [("3 · G2", "testes")]),
+    ("O que o p-valor do exemplo significa (e o que não)", [("3 · G2", "testes")]),
+    ("Erro tipo I e II no cenário; qual é mais grave", [("4 · Erro tipo I e II", "erro-tipo-1")]),
+    ("Algum teste se afastou de 5%? Liberal ou conservador?", [("4 · G3", "erro-tipo-1")]),
+    ("Qual teste tem mais poder, e isso muda com o efeito?", [("5 · G4", "poder"), ("5 · Simulador", "explore-poder")]),
+    ("Que violação foi simulada e por que afeta mais um teste", [
+        ("4 · G3", "erro-tipo-1"), ("5 · G4", "poder"),
+    ]),
+    ("O que muda no G3 e no G4 com α = 0,01", [
+        ("4 · G3", "erro-tipo-1"), ("5 · G4", "poder"), ("5 · Simulador", "explore-poder"),
+    ]),
+    ("A simulação confirmou o que esperávamos?", [("7 · Conclusão", "conclusao")]),
+    ("Os testes concordam nos dados reais? Efeito prático?", [("6 · Tabela", "dados-reais")]),
+    ("Recomendação, quando mudaria e principal limitação", [("7 · Conclusão", "conclusao")]),
+]
+
+# Marca na navegação a seção visível. O Streamlit rola um contêiner interno, e não a janela, por
+# isso o evento de rolagem é ouvido na fase de captura, que pega a rolagem de qualquer elemento.
+SCRIPT_NAVEGACAO = """
+<script>
+(() => {
+  if (window.__navAtiva) { window.__navAtiva(); return; }
+  const DISTANCIA_DO_TOPO = 140;
+  const atualizar = () => {
+    const links = [...document.querySelectorAll('.nav a[href^="#"]')];
+    if (!links.length) return;
+    let ativo = links[0];
+    for (const link of links) {
+      const titulo = document.querySelector('div.sec-head' + link.getAttribute('href'));
+      if (titulo && titulo.getBoundingClientRect().top <= DISTANCIA_DO_TOPO) ativo = link;
+    }
+    // A última seção é curta e pode nunca chegar ao topo: no fim da página, ela fica ativa
+    const cartoes = document.querySelectorAll('[class*="st-key-sec-"]');
+    const ultimo = cartoes[cartoes.length - 1];
+    if (ultimo && ultimo.getBoundingClientRect().bottom <= window.innerHeight + 4) ativo = links[links.length - 1];
+    links.forEach((link) => link.classList.toggle('active', link === ativo));
+  };
+  let agendado = false;
+  const agendar = () => {
+    if (agendado) return;
+    agendado = true;
+    requestAnimationFrame(() => { agendado = false; atualizar(); });
+  };
+  document.addEventListener('scroll', agendar, true);
+  window.addEventListener('resize', agendar);
+  // A cada nova execução, o Streamlit redesenha a barra lateral e a marcação some
+  new MutationObserver(agendar).observe(document.body, { childList: true, subtree: true });
+  window.__navAtiva = atualizar;
+  atualizar();
+})();
+</script>
+"""
+
+
 def sidebar() -> None:
     itens = "".join(
         f"<a href='#{ancora}'><span>{i}</span>{titulo}</a>"
         for i, (ancora, titulo, _, _) in enumerate(SECOES, start=1)
     )
+    perguntas = "".join(
+        f"<li><span class='q-num'>{i}</span><div><p>{texto}</p><div class='q-links'>"
+        + "".join(f"<a href='#{ancora}'>{rotulo}</a>" for rotulo, ancora in destinos)
+        + "</div></div></li>"
+        for i, (texto, destinos) in enumerate(GUIA_PERGUNTAS, start=1)
+    )
     st.sidebar.markdown(
-        f"<div class='nav-title'>Seções</div><nav class='nav'>{itens}</nav>",
+        f"""
+        <div class='nav-title'>Seções</div><nav class='nav'>{itens}</nav>
+        <div class='nav-title guide-title'>Guia das 15 perguntas</div>
+        <ol class='guide'>{perguntas}</ol>
+        """,
         unsafe_allow_html=True,
     )
+    st.sidebar.html(SCRIPT_NAVEGACAO, unsafe_allow_javascript=True)
 
 
 @st.cache_data
@@ -444,11 +516,11 @@ def tabela_situacoes(c) -> None:
             <tbody>{corpo}</tbody>
           </table>
         </div>
-        <p class="table-note">Em todas, o tamanho do efeito é um deslocamento no log dos tempos, em
-        desvios ({fmt(c.sigma, 2)}), para que os resultados sejam comparáveis. Em "Outliers",
-        {fmt(100 * c.parcela_outlier, 1)}% dos PRs (a parcela real parada por mais de {dias} dias) são
-        deslocados em {fmt(c.deslocamento_outlier, 1)} desvios (a distância do PR real mais lento até
-        a mediana).</p>
+        <p class="table-note">Em todas as situações, o efeito é medido do mesmo jeito, por quantas vezes
+        os tempos com bot ficam maiores (efeito {fmt(EFEITO_EXEMPLO, 1)} = tempos ×
+        {fmt(np.exp(EFEITO_EXEMPLO * c.sigma), 1)}), para que dê para compará-las. Em "Outliers",
+        {fmt(100 * c.parcela_outlier, 0)}% dos PRs, a parcela real que ficou parada mais de {dias} dias,
+        viram PRs esquecidos, tão lentos quanto o PR real mais demorado.</p>
         """,
         unsafe_allow_html=True,
     )
@@ -466,6 +538,13 @@ def conteudo_testes() -> None:
     u_menor, u_maior = referencias[mw].limites_criticos
     multiplicador = np.exp(EFEITO_EXEMPLO * calibrar().sigma)
 
+    def decisao_exemplo(teste: str) -> str:
+        # No exemplo o efeito existe: rejeitar H₀ é acertar, e não rejeitar é um erro tipo II
+        p = fmt(exemplo.loc[teste, "p_valor"], 3)
+        if exemplo.loc[teste, "rejeita_h0"]:
+            return f"O {teste} dá p = {p} e rejeita H₀, ou seja, acerta."
+        return f"O {teste} dá p = {p}, não rejeita e erra (erro tipo II), mesmo com o efeito existindo."
+
     with st.container(key="grafico-g2"):
         st.plotly_chart(
             g2_estatistica_h0(exemplo, referencias, estatisticas_h0, ALPHA),
@@ -477,22 +556,30 @@ def conteudo_testes() -> None:
         f"""
         <dl class="facts">
           <dt>O que cada teste compara</dt>
-          <dd>O <b>{welch}</b> compara as médias dos grupos, em erros-padrão; o <b>{mw}</b> conta em
-          quantos dos {fmt(N_EXEMPLO ** 2, 0)} pares (com bot, sem bot) o PR com bot demorou mais (U),
-          e cada empate vale meio.</dd>
+          <dd>O <b>{welch}</b> pergunta se a média com bot é diferente da média sem bot, e mede essa
+          diferença numa escala própria (t): quanto mais longe de zero, maior a diferença. O <b>{mw}</b>
+          ignora o valor das horas e olha só quem demorou mais: forma todos os
+          {fmt(N_EXEMPLO ** 2, 0)} pares possíveis (um PR com bot e um sem) e conta em quantos o PR com
+          bot foi mais lento (U). Se o bot não mudasse nada, o esperado seria metade:
+          {fmt(referencias[mw].centro, 0)}.</dd>
           <dt>Região de rejeição</dt>
-          <dd>Como o teste é bicaudal, os {fmt(100 * ALPHA, 0)}% de α se dividem entre as duas pontas
-          da curva: rejeita-se H₀ se |t| &gt; {fmt(t_critico, 2)} ou se U ficar fora de
-          {fmt(u_menor, 0)} a {fmt(u_maior, 0)}.</dd>
+          <dd>A curva mostra os valores que cada estatística costuma ter quando o bot não muda nada. As
+          pontas em rosa são os {fmt(100 * ALPHA, 0)}% de resultados mais extremos,
+          {fmt(50 * ALPHA, 1)}% de cada lado, porque o teste é bicaudal. Se o resultado cair ali, é
+          improvável demais para ser acaso, e o teste rejeita H₀: no {welch}, quando t passa de
+          ±{fmt(t_critico, 2)}; no {mw}, quando U fica abaixo de {fmt(u_menor, 0)} ou acima de
+          {fmt(u_maior, 0)}.</dd>
           <dt>P-valor do exemplo</dt>
-          <dd>Com tempos {fmt(multiplicador, 1)} vezes maiores com bot, a área hachurada (a chance de um
-          resultado tão extremo se H₀ fosse verdadeira, não a de H₀ ser verdadeira) é de
-          {fmt(100 * exemplo.loc[welch, "p_valor"], 1)}% no {welch}, que comete um erro tipo II, e de
-          {fmt(100 * exemplo.loc[mw, "p_valor"], 1)}% no {mw}, que rejeita H₀.</dd>
+          <dd>Neste exemplo, o bot deixa os merges {fmt(multiplicador, 1)} vezes mais lentos. A área
+          hachurada é o p-valor: a chance de ver um resultado tão extremo quanto este <b>se o bot não
+          mudasse nada</b>. {decisao_exemplo(mw)} {decisao_exemplo(welch)} O p-valor <b>não</b> é a
+          chance de H₀ ser verdadeira.</dd>
           <dt>Curva × simulação</dt>
-          <dd>Nos {fmt(N_SIMULACOES, 0)} conjuntos sem efeito (barras), o U segue a curva, mas o t forma
-          dois picos perto de ±1, porque o PR mais lento domina a média e a variância do grupo, e só
-          {fmt(rejeicoes[welch], 1)}% rejeitam H₀ no {welch}, contra {fmt(rejeicoes[mw], 1)}% no {mw}.</dd>
+          <dd>As barras cinza são {fmt(N_SIMULACOES, 0)} coletas simuladas sem efeito. No {mw}, elas
+          seguem a curva: o teste se comporta como promete. No {welch}, formam dois morros perto de −1 e
+          +1, em vez de um pico no zero, porque um único PR muito lento domina a média e a variância do
+          grupo. Por isso o t raramente chega às pontas, e só {fmt(rejeicoes[welch], 1)}% das coletas dão
+          alarme falso, em vez de {fmt(100 * ALPHA, 0)}%.</dd>
         </dl>
         """,
         unsafe_allow_html=True,
@@ -537,26 +624,60 @@ def conteudo_testes() -> None:
     )
 
 
+def seletor_alpha(chave: str) -> float:
+    """α do gráfico; os textos da seção seguem em ALPHA, que é o α do estudo."""
+    return st.radio(
+        "Nível de significância do gráfico",
+        [ALPHA, ALPHA_ESTRITO],
+        format_func=lambda a: f"α = {fmt(a, 2)}",
+        horizontal=True,
+        key=chave,
+    )
+
+
+def nota_alpha(alpha: float) -> None:
+    if alpha != ALPHA:
+        st.markdown(
+            f"<p class='table-note alpha-note'>O gráfico está em α = {fmt(alpha, 2)}; os textos abaixo "
+            f"descrevem α = {fmt(ALPHA, 2)}, o nível do estudo.</p>",
+            unsafe_allow_html=True,
+        )
+
+
+@st.fragment
+def grafico_g3() -> None:
+    alpha = seletor_alpha("alpha_g3")
+    with st.container(key="grafico-g3"):
+        st.plotly_chart(
+            g3_erro_tipo_1(erro_tipo_1(simulacoes(), alpha), alpha),
+            theme=None,
+            config={"displayModeBar": False},
+        )
+    nota_alpha(alpha)
+
+
 def conteudo_erro_tipo_1() -> None:
     welch = TESTE_PARAMETRICO
     mw = TESTE_NAO_PARAMETRICO
     erro = erro_tipo_1(simulacoes(), ALPHA).set_index(["situacao", "teste"])
     erro_estrito = erro_tipo_1(simulacoes(), ALPHA_ESTRITO).set_index(["situacao", "teste"])
 
-    with st.container(key="grafico-g3"):
-        st.plotly_chart(
-            g3_erro_tipo_1(erro.reset_index(), ALPHA),
-            theme=None,
-            config={"displayModeBar": False},
-        )
+    grafico_g3()
 
-    def taxa(situacao: str, teste: str = welch) -> str:
-        return f"{fmt(100 * erro.loc[(situacao, teste), 'proporcao'], 1)}%"
+    def taxa(situacao: str, teste: str = welch, tabela: pd.DataFrame = erro, casas: int = 1) -> str:
+        return f"{fmt(100 * tabela.loc[(situacao, teste), 'proporcao'], casas)}%"
+
+    def taxa_estrita(situacao: str, teste: str = welch) -> str:
+        return taxa(situacao, teste, erro_estrito, 2)
 
     taxas_mw = erro.xs(mw, level="teste")["proporcao"]
+    taxas_mw_estritas = erro_estrito.xs(mw, level="teste")["proporcao"]
+
+    def uma_a_cada(p: float) -> str:
+        if p == 0:
+            return f"nenhuma vez em {fmt(N_SIMULACOES, 0)}"
+        return f"1 a cada {fmt(round(1 / p), 0)}"
     desigual = erro.loc[("desbalanceado", welch)]
-    exato_30 = erro_tipo_1_exato_mann_whitney(N_POR_GRUPO, N_POR_GRUPO)
-    exato_10 = erro_tipo_1_exato_mann_whitney(N_PEQUENO, N_PEQUENO)
     faixa = [100 * ALPHA * limite for limite in FAIXA_ACEITAVEL]
 
     st.markdown(
@@ -566,6 +687,12 @@ def conteudo_erro_tipo_1() -> None:
           <dd>Cada ponto é a proporção de p &lt; {fmt(ALPHA, 2)} em {fmt(N_SIMULACOES, 0)} conjuntos
           sem efeito, com margem de erro de 95%: como H₀ é verdadeira, toda rejeição é erro tipo I, e
           o esperado é ficar perto de {fmt(100 * ALPHA, 0)}%.</dd>
+          <dt>Erro tipo I e tipo II</dt>
+          <dd><b>Tipo I</b> é concluir que o bot muda o tempo de merge quando ele não muda (um alarme
+          falso, o que este gráfico mede). <b>Tipo II</b> é não perceber um atraso real causado pelo
+          bot (a falta de poder da seção 5). Aqui o tipo II é o mais grave: um alarme falso leva, no
+          máximo, a reconfigurar um bot que não fazia diferença, mas um atraso não percebido continua
+          custando tempo em todos os PRs.</dd>
           <dt>{mw}</dt>
           <dd>Ficou perto de {fmt(100 * ALPHA, 0)}% em todas as situações
           ({fmt(100 * taxas_mw.min(), 1)}% a {fmt(100 * taxas_mw.max(), 1)}%), porque, sob H₀, os postos
@@ -580,6 +707,14 @@ def conteudo_erro_tipo_1() -> None:
           {int(desigual["rejeicoes_com_bot_maior"])} das {int(desigual["rejeicoes"])} rejeições apontam
           merge mais lento com bot, em vez de se dividirem entre os lados, porque ocorrem quando o
           grupo menor fica sem PRs lentos.</dd>
+          <dt>Com α = {fmt(ALPHA_ESTRITO, 2)}</dt>
+          <dd>O teste passa a aceitar só {fmt(100 * ALPHA_ESTRITO, 0)}% de alarmes falsos, cerca de
+          {uma_a_cada(ALPHA_ESTRITO)} coletas em que o bot não muda nada. O {mw} cumpre isso em todas
+          as situações ({fmt(100 * taxas_mw_estritas.min(), 2)}% a {fmt(100 * taxas_mw_estritas.max(), 2)}%),
+          e o {welch}, no controle ({taxa_estrita("normal")}). Com dados assimétricos, porém, o {welch}
+          quase nunca dispara: {taxa_estrita("mistura")} no cenário principal, cerca de
+          {uma_a_cada(erro_estrito.loc[("mistura", welch), "proporcao"])} coletas. Parece bom, mas é
+          sinal de cautela demais, que também o faz deixar passar efeitos reais (seção 5).</dd>
         </dl>
         """,
         unsafe_allow_html=True,
@@ -600,7 +735,6 @@ def conteudo_erro_tipo_1() -> None:
             f"<td class='num'>{celula_taxa(erro_estrito.loc[(chave, welch)])}</td>"
             f"<td class='num'>{celula_taxa(erro_estrito.loc[(chave, mw)])}</td></tr>"
         )
-    variancias = erro.loc[("variancias_diferentes", welch)]
     st.markdown(
         f"""
         <div class="table-scroll">
@@ -613,13 +747,12 @@ def conteudo_erro_tipo_1() -> None:
             <tbody>{corpo}</tbody>
           </table>
         </div>
-        <p class="table-note">"Perto" é a faixa de {fmt(faixa[0], 1)}% a {fmt(faixa[1], 1)}%, o critério
-        liberal de Bradley (1978). Conservador é o teste que rejeita menos que α: ele erra menos do que
-        promete, mas o custo aparece no poder (seção 5). O {mw} tende a ficar um pouco abaixo de α por
-        causa da correção de continuidade: sem empates, a taxa exata é de {fmt(100 * exato_30, 1)}% com
-        {N_POR_GRUPO} PRs por grupo e de {fmt(100 * exato_10, 1)}% com {N_PEQUENO}. Em "Variâncias
-        diferentes", com efeito zero, as médias dos grupos diferem: a H₀ do {welch} é falsa, e seus
-        {fmt(100 * variancias["proporcao"], 1)}% não são erro tipo I.</p>
+        <p class="table-note">Consideramos "perto de {fmt(100 * ALPHA, 0)}%" qualquer valor entre
+        {fmt(faixa[0], 1)}% e {fmt(faixa[1], 1)}%, uma tolerância usual (critério de Bradley). Um teste
+        conservador dá menos alarmes falsos do que promete, o que parece bom, mas costuma deixar passar
+        efeitos reais (seção 5). O {mw} fica um pouco abaixo de {fmt(100 * ALPHA, 0)}% por um ajuste de
+        cálculo que o deixa mais cauteloso. Em "Variâncias diferentes", o {welch} fica de fora: ali as
+        médias já diferem mesmo sem efeito, então suas rejeições não são alarmes falsos.</p>
         """,
         unsafe_allow_html=True,
     )
@@ -668,17 +801,97 @@ def poder_no_efeito_real(teste: str) -> float:
     return float(np.interp(efeito_real(), efeitos, [poder(SITUACAO_EXEMPLO, teste, e) for e in efeitos]))
 
 
+def poder_por_alpha() -> pd.DataFrame:
+    """Proporção de rejeições nos dois α, indexada por situação, teste e α (efeito de exemplo)."""
+    sim = simulacoes()
+    return sim[sim["efeito"] == EFEITO_EXEMPLO].set_index(["situacao", "teste", "alpha"])
+
+
+def tabela_poder_por_alpha() -> None:
+    """Poder no efeito de exemplo com α = ALPHA e ALPHA_ESTRITO, lado a lado (pergunta 12)."""
+    welch = TESTE_PARAMETRICO
+    mw = TESTE_NAO_PARAMETRICO
+    linhas = poder_por_alpha()
+    corpo = "".join(
+        f"<tr><th>{s.nome}</th>"
+        + "".join(
+            f"<td>{fmt(100 * linhas.loc[(chave, t, a), 'proporcao'], 1)}%</td>"
+            for t in (welch, mw)
+            for a in (ALPHA, ALPHA_ESTRITO)
+        )
+        + "</tr>"
+        for chave, s in SITUACOES.items()
+    )
+    alphas = "".join(f"<th>α = {fmt(a, 2)}</th>" for a in (ALPHA, ALPHA_ESTRITO)) * 2
+    multiplicador = np.exp(EFEITO_EXEMPLO * calibrar().sigma)
+    st.markdown(
+        f"""
+        <div class="table-scroll">
+          <table class="stats-table">
+            <caption>Poder com efeito {fmt(EFEITO_EXEMPLO, 1)} (tempos × {fmt(multiplicador, 1)}):
+            α = {fmt(ALPHA, 2)} × {fmt(ALPHA_ESTRITO, 2)}</caption>
+            <thead>
+              <tr><th rowspan="2">Situação</th><th colspan="2">{welch}</th><th colspan="2">{mw}</th></tr>
+              <tr>{alphas}</tr>
+            </thead>
+            <tbody>{corpo}</tbody>
+          </table>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+@st.fragment
+def grafico_g4() -> None:
+    alpha = seletor_alpha("alpha_g4")
+    sim = simulacoes()
+    with st.container(key="grafico-g4"):
+        st.plotly_chart(
+            g4_poder(sim[sim["alpha"] == alpha], alpha, efeito_real()),
+            theme=None,
+            config={"displayModeBar": False},
+        )
+    nota_alpha(alpha)
+    if alpha == ALPHA_ESTRITO:
+        tabela_poder_por_alpha()
+
+
 def conteudo_poder() -> None:
     welch = TESTE_PARAMETRICO
     mw = TESTE_NAO_PARAMETRICO
     sim = simulacoes()
     sim = sim[sim["alpha"] == ALPHA]
 
-    with st.container(key="grafico-g4"):
-        st.plotly_chart(g4_poder(sim, ALPHA, efeito_real()), theme=None, config={"displayModeBar": False})
+    grafico_g4()
+
+    def poder_estrito(situacao: str, teste: str) -> float:
+        return poder_por_alpha().loc[(situacao, teste, ALPHA_ESTRITO), "proporcao"]
+
+    def chance(situacao: str, teste: str, alpha: float) -> str:
+        """Frequência redonda: "3 de cada 10 coletas", "1 a cada 500 coletas"."""
+        p = poder(situacao, teste) if alpha == ALPHA else poder_estrito(situacao, teste)
+        if p >= 0.15:
+            return f"{round(10 * p)} de cada 10 coletas"
+        a_cada = round(1 / p)
+        if a_cada >= 100:
+            a_cada = round(a_cada, -2)
+        return f"1 a cada {fmt(a_cada, 0)} coletas"
+
+    def em_10(teste: str, alpha: float) -> int:
+        p = poder("normal", teste) if alpha == ALPHA else poder_estrito("normal", teste)
+        return round(10 * p)
+
+    # No controle, os dois costumam arredondar para a mesma frequência
+    if all(em_10(welch, a) == em_10(mw, a) for a in (ALPHA, ALPHA_ESTRITO)):
+        controle = f"os dois caem de cerca de {em_10(welch, ALPHA)} para {em_10(welch, ALPHA_ESTRITO)} em cada 10 coletas"
+    else:
+        controle = (
+            f"o {welch} cai de {em_10(welch, ALPHA)} para {em_10(welch, ALPHA_ESTRITO)} em cada 10 coletas, "
+            f"e o {mw}, de {em_10(mw, ALPHA)} para {em_10(mw, ALPHA_ESTRITO)}"
+        )
 
     curvas = curvas_poder()
-    efeitos = efeitos_simulados()
     vantagem_normal, _, welch_ganha = vantagem_welch_no_controle()
     outliers = vantagem_welch("outliers")
     maximo_welch = sim[(sim["situacao"] == SITUACAO_EXEMPLO) & (sim["teste"] == welch)]["proporcao"].max()
@@ -706,6 +919,11 @@ def conteudo_poder() -> None:
           mal saem do chão: com {N_POR_GRUPO} PRs por grupo, o poder é de
           {fmt(100 * poder_no_efeito_real(mw), 0)}% no {mw} e {fmt(100 * poder_no_efeito_real(welch), 0)}%
           no {welch}.</dd>
+          <dt>Com α = {fmt(ALPHA_ESTRITO, 2)}</dt>
+          <dd>Exigir mais evidência faz os testes perceberem menos efeitos reais: no controle normal,
+          {controle}. Com dados assimétricos, como os PRs reais, o {welch} praticamente para de perceber
+          ({chance(SITUACAO_EXEMPLO, welch, ALPHA_ESTRITO)}), enquanto o {mw} ainda percebe em
+          {chance(SITUACAO_EXEMPLO, mw, ALPHA_ESTRITO)}.</dd>
         </dl>
         """,
         unsafe_allow_html=True,
@@ -738,10 +956,10 @@ def conteudo_poder() -> None:
           {tabela(f"Poder com efeito {fmt(EFEITO_EXEMPLO, 1)} (tempos × {fmt(multiplicador, 1)})", celula_poder)}
           {tabela(f"Efeito necessário para {fmt(100 * PODER_ALVO, 0)}% de poder", celula_efeito)}
         </div>
-        <p class="table-note">O efeito é o deslocamento do grupo com bot no log dos tempos, em desvios;
-        o multiplicador ao lado é quantas vezes os tempos crescem. O efeito para {fmt(100 * PODER_ALVO, 0)}%
-        é interpolado entre os {len(efeitos)} efeitos simulados, e a margem é de 95%. Em "Amostra pequena",
-        são {N_PEQUENO} PRs por grupo; nas demais, {N_POR_GRUPO}.</p>
+        <p class="table-note">O número com × ao lado do efeito diz quantas vezes mais
+        lentos ficam os merges com bot, e o ± é a margem de erro da simulação. "Não chega" quer dizer que o
+        teste não alcança {fmt(100 * PODER_ALVO, 0)}% nem com o maior efeito simulado. Em "Amostra
+        pequena", são {N_PEQUENO} PRs por grupo; nas demais, {N_POR_GRUPO}.</p>
         """,
         unsafe_allow_html=True,
     )
@@ -795,7 +1013,7 @@ def explorar_poder() -> None:
     mw = TESTE_NAO_PARAMETRICO
     st.markdown(
         """
-        <div class="subhead"><h3>Explore o poder</h3><span class="sec-tag">Bônus</span></div>
+        <div class="subhead" id="explore-poder"><h3>Explore o poder</h3><span class="sec-tag">Simulador interativo</span></div>
         <p class="table-note">Mude o tamanho da amostra e o tamanho do efeito para ver o poder dos dois
         testes mudar. Cada ponto é recalculado na hora, a partir do mesmo gerador do G4.</p>
         """,
@@ -961,6 +1179,18 @@ def conteudo_dados_reais() -> None:
 
     poder_real = {t: poder_no_efeito_real(t) for t in (welch, mw)}
 
+    # Importância prática: o PR típico (mediana) e a média sem os PRs abertos por mais de um ano
+    df_amostra, df_elegiveis = carregar_amostra(), pd.read_csv(ELEGIVEIS_PATH)
+    med_amostra = df_amostra.groupby("grupo")["horas_ate_merge"].median()
+    med_elegiveis = df_elegiveis.groupby("grupo")["horas_ate_merge"].median()
+    media_elegiveis = df_elegiveis.groupby("grupo")["horas_ate_merge"].mean()
+    parados = df_elegiveis["horas_ate_merge"] > HORAS_POR_ANO
+    n_parados = int((parados & (df_elegiveis["grupo"] == "com_bot")).sum())
+    media_sem_parados = df_elegiveis[~parados].groupby("grupo")["horas_ate_merge"].mean()
+
+    def minutos(horas: float) -> str:
+        return f"{fmt(60 * horas, 0)} min"
+
     def p(resultados: pd.DataFrame, teste: str) -> str:
         return fmt(resultados.loc[teste, "p_valor"], 3)
 
@@ -988,6 +1218,15 @@ def conteudo_dados_reais() -> None:
           {N_POR_GRUPO} PRs por grupo, a simulação dá ao {mw} só {fmt(100 * poder_real[mw], 0)}% de
           chance de detectá-lo, e ao {welch}, {fmt(100 * poder_real[welch], 0)}%. Não rejeitar H₀ na
           amostra não mostra que o bot é indiferente, só que ela é pequena demais.</dd>
+          <dt>Importância prática</dt>
+          <dd>Mesmo que fosse significativo, o efeito não mudaria o dia a dia da equipe. O PR típico
+          (mediana) leva {minutos(med_amostra["sem_bot"])} sem bot e {minutos(med_amostra["com_bot"])}
+          com bot na amostra, e {minutos(med_elegiveis["sem_bot"])} e {minutos(med_elegiveis["com_bot"])}
+          entre os elegíveis: uma diferença de minutos, que até troca de sinal. A média dos elegíveis
+          vai de {fmt(media_elegiveis["sem_bot"], 0)} h para {fmt(media_elegiveis["com_bot"], 0)} h com
+          bot, mas por causa de {n_parados} PRs com bot abertos por mais de um ano; sem eles, fica em
+          {fmt(media_sem_parados["com_bot"], 0)} h, contra {fmt(media_sem_parados["sem_bot"], 0)} h
+          sem bot.</dd>
         </dl>
         """,
         unsafe_allow_html=True,
@@ -1028,8 +1267,9 @@ def conteudo_dados_reais() -> None:
           {tabela(f"Amostra do laboratório ({n_sem} + {n_com} PRs)", amostra)}
           {tabela(f"Todos os elegíveis ({n_sem_el} + {n_com_el} PRs)", elegiveis)}
         </div>
-        <p class="table-note">g de Hedges (Welch) e r rank-biserial (Mann-Whitney): valores positivos
-        indicam tempos maiores com bot. A amostra foi sorteada dos elegíveis com a semente {SEED}.</p>
+        <p class="table-note">Cada teste mede o tamanho do efeito do seu jeito: no {welch} (g), é a
+        diferença entre as médias; no {mw} (r), vai de −1 a +1, e 0 quer dizer que nenhum grupo tende a
+        demorar mais. Nos dois, um valor positivo indica merges mais lentos com bot.</p>
         """,
         unsafe_allow_html=True,
     )

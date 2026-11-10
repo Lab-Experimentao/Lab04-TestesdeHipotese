@@ -277,6 +277,9 @@ html, body, .stApp, .stMarkdown, button, input {
 .power-reading { margin-bottom: .5rem; }
 .power-reading b { color: var(--text); }
 
+/* Seletor de α do G3 e do G4 */
+.alpha-note { margin-bottom: 1rem; font-style: italic; }
+
 /* ---------- Sidebar ---------- */
 [data-testid="stSidebar"] { background: var(--surface); border-right: 1px solid var(--border); }
 .nav-title {
@@ -298,3 +301,39 @@ html, body, .stApp, .stMarkdown, button, input {
 }
 .nav a:hover { background: var(--soft); }
 .nav a span { width: 1.2rem; color: var(--muted); font-family: "JetBrains Mono", monospace; font-size: .75rem; }
+/* Seção visível no momento (marcada pelo script de navegação) */
+.nav a.active { background: var(--soft); font-weight: 600; box-shadow: inset 3px 0 0 var(--text); }
+.nav a.active span { color: var(--text); }
+
+/* Guia das 15 perguntas */
+.guide-title { margin-top: 1.75rem; }
+.guide { list-style: none; margin: 0; padding: 0; }
+.guide li {
+  display: flex;
+  gap: .6rem;
+  margin: 0 !important;
+  padding: .55rem .6rem;
+  border-top: 1px solid var(--border);
+}
+.guide li:first-child { border-top: none; }
+.guide .q-num {
+  flex: none;
+  width: 1.2rem;
+  padding-top: .1rem;
+  color: var(--muted);
+  font-family: "JetBrains Mono", monospace;
+  font-size: .75rem;
+}
+.guide p { margin: 0 0 .35rem !important; font-size: .85rem; line-height: 1.4; color: var(--text); }
+.guide .q-links { display: flex; flex-wrap: wrap; gap: .3rem; }
+.guide .q-links a {
+  padding: .05rem .45rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--muted) !important;
+  font-size: .72rem;
+  text-decoration: none !important;
+  white-space: nowrap;
+  transition: background .15s, color .15s, border-color .15s;
+}
+.guide .q-links a:hover { background: var(--text); border-color: var(--text); color: #fff !important; }
