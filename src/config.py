@@ -22,7 +22,7 @@ RAW_DATA_DIR = DATA_DIR / "raw"
 PROCESSED_DATA_DIR = DATA_DIR / "processed"
 
 # Links exibidos no topo do dashboard
-DASHBOARD_URL = "https://<preencher-apos-publicar>.streamlit.app"
+DASHBOARD_URL = "https://lab04-testes-hipotese.streamlit.app"
 PROJECTS_URL = "https://github.com/orgs/Lab-Experimentao/projects/3/views/1"
 REPO_URL = "https://github.com/Lab-Experimentao/Lab04-TestesdeHipotese"
 

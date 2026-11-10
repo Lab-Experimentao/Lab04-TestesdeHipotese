@@ -2,8 +2,8 @@
 
 Testes de hipótese por dentro: cenário, simulação e visualização.
 
-- **Dashboard:** <https://preencher-apos-publicar.streamlit.app>
-- **GitHub Projects:** <https://github.com/users/lucasrsnd/projects/2>
+- **Dashboard:** <https://lab04-testes-hipotese.streamlit.app>
+- **GitHub Projects:** <https://github.com/orgs/Lab-Experimentao/projects/3/views/1>
 
 ## Como executar
 
@@ -11,7 +11,8 @@ Requer Python 3.10+. Instalação (uma vez, em ambiente virtual):
 
 ```bash
 python -m venv .venv
-.venv\Scripts\activate        # Windows  (Linux/macOS: source .venv/bin/activate)
+source .venv/bin/activate     # Linux/macOS
+.venv\Scripts\activate        # Windows
 pip install -r requirements.txt
 ```
 
@@ -55,6 +56,8 @@ python -m src.monte_carlo  # gera data/processed/simulacoes.csv (10.000 repetiç
 ├── data/
 │   ├── raw/             # Dados reais coletados (CSV + README com a fonte)
 │   └── processed/       # Estatísticas descritivas e resultados das simulações
+├── docs/
+│   └── roteiro_apresentacao.md  # Perguntas da apresentação e onde mostrar cada resposta
 └── src/
     ├── config.py        # Semente, α, nº de simulações, paleta de cores e links
     ├── coleta.py        # Coleta dos PRs pela API do GitHub
@@ -65,30 +68,11 @@ python -m src.monte_carlo  # gera data/processed/simulacoes.csv (10.000 repetiç
     └── graficos.py      # Gráficos do dashboard, em Plotly (G1 a G4)
 ```
 
-## Sugestão para os gráficos: Apache ECharts
+## Publicação
 
-Para G1–G4 (e o gráfico interativo do bônus), sugerimos o [Apache ECharts](https://echarts.apache.org/)
-via [`streamlit-echarts`](https://pypi.org/project/streamlit-echarts/):
-
-- visual mais refinado que o padrão do Plotly, com animações e tooltips prontos;
-- `markArea` e `markLine` resolvem direto a região de rejeição sombreada (G2) e a linha de 5% (G3);
-- `dataZoom` e eventos facilitam o bônus (variar n e o tamanho do efeito).
-
-```bash
-pip install streamlit-echarts
-```
-
-```python
-from streamlit_echarts import st_echarts
-from src.config import CORES_TESTES
-
-st_echarts({
-    "color": list(CORES_TESTES.values()),
-    "xAxis": {"type": "value", "name": "Tamanho do efeito"},
-    "yAxis": {"type": "value", "name": "Poder (proporção de rejeições)", "max": 1},
-    "series": [{"name": nome, "type": "line", "data": [...]} for nome in CORES_TESTES],
-}, height="420px")
-```
+O dashboard está no [Streamlit Community Cloud](https://streamlit.io/cloud), ligado ao branch `main`
+deste repositório (arquivo `app.py`, Python 3.12): cada push no `main` atualiza o app publicado.
+Sem acessos por alguns dias, o app hiberna; ao abrir o link, basta clicar no botão para acordá-lo.
 
 ## Reprodutibilidade
 
