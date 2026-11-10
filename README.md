@@ -57,7 +57,7 @@ python -m src.monte_carlo  # gera data/processed/simulacoes.csv (10.000 repetiç
     ├── simulacao.py     # Gerador de dados simulados calibrado nos dados reais
     ├── monte_carlo.py   # Proporção de rejeições por situação × tamanho do efeito (Q1 a Q3)
     ├── testes.py        # t de Welch e Mann-Whitney: estatística, p-valor, efeito e distribuição sob H₀
-    └── graficos.py      # Gráficos do dashboard, em Plotly (G1 a G3)
+    └── graficos.py      # Gráficos do dashboard, em Plotly (G1 a G4)
 ```
 
 ## Sugestão para os gráficos: Apache ECharts

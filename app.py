@@ -26,11 +26,13 @@ from src.config import (
     get_rng,
 )
 from src.descritiva import ARQUIVO_AMOSTRA, carregar_amostra, descritiva
-from src.graficos import fmt, g1_real_simulado, g2_estatistica_h0, g3_erro_tipo_1
+from src.graficos import PODER_ALVO, fmt, g1_real_simulado, g2_estatistica_h0, g3_erro_tipo_1, g4_poder
 from src.monte_carlo import (
     ARQUIVO_SIMULACOES,
     FAIXA_ACEITAVEL,
+    Z_95,
     carregar_simulacoes,
+    efeito_para_poder,
     erro_tipo_1,
     gerar_lote_da_configuracao,
 )
@@ -617,6 +619,101 @@ def conteudo_erro_tipo_1() -> None:
     )
 
 
+def conteudo_poder() -> None:
+    welch = TESTE_PARAMETRICO
+    mw = TESTE_NAO_PARAMETRICO
+    sim = simulacoes()
+    sim = sim[sim["alpha"] == ALPHA]
+    efeito_real = abs(testes_reais()["Elegíveis"][3])
+
+    with st.container(key="grafico-g4"):
+        st.plotly_chart(g4_poder(sim, ALPHA, efeito_real), theme=None, config={"displayModeBar": False})
+
+    curvas = sim.set_index(["situacao", "teste", "efeito"])
+    efeitos = sorted(sim["efeito"].unique())
+
+    def poder(situacao: str, teste: str, efeito: float = EFEITO_EXEMPLO) -> float:
+        return curvas.loc[(situacao, teste, efeito), "proporcao"]
+
+    def vantagem_welch(situacao: str) -> pd.Series:
+        """Poder do Welch menos o do Mann-Whitney, por efeito, sem o efeito zero."""
+        return pd.Series({e: poder(situacao, welch, e) - poder(situacao, mw, e) for e in efeitos if e > 0})
+
+    normal = vantagem_welch("normal")
+    efeito_normal = normal.idxmax()
+    linha_normal = [curvas.loc[("normal", t, efeito_normal)] for t in (welch, mw)]
+    margem_normal = np.hypot(*(l["margem_erro"] for l in linha_normal))
+    welch_ganha = normal.max() > margem_normal
+    outliers = vantagem_welch("outliers")
+    maximo_welch = sim[(sim["situacao"] == SITUACAO_EXEMPLO) & (sim["teste"] == welch)]["proporcao"].max()
+    multiplicador = np.exp(EFEITO_EXEMPLO * calibrar().sigma)
+    poder_real = {
+        t: np.interp(efeito_real, efeitos, [poder(SITUACAO_EXEMPLO, t, e) for e in efeitos]) for t in (welch, mw)
+    }
+
+    st.markdown(
+        f"""
+        <dl class="facts">
+          <dt>O que o gráfico mostra</dt>
+          <dd>Cada painel é uma situação, e cada ponto, a proporção de {fmt(N_SIMULACOES, 0)} conjuntos
+          com p &lt; {fmt(ALPHA, 2)} quando o efeito existe; no efeito zero, é o erro tipo I da seção 4.
+          A linha tracejada marca {fmt(100 * PODER_ALVO, 0)}%, o poder usual de referência.</dd>
+          <dt>Quem detecta melhor</dt>
+          <dd>O <b>{mw}</b>, em todas as violações: no cenário principal, com tempos
+          {fmt(multiplicador, 1)} vezes maiores com bot (efeito {fmt(EFEITO_EXEMPLO, 1)}), ele detecta o
+          efeito em {fmt(100 * poder(SITUACAO_EXEMPLO, mw), 0)}% dos conjuntos, contra
+          {fmt(100 * poder(SITUACAO_EXEMPLO, welch), 0)}% do {welch}, que não passa de
+          {fmt(100 * maximo_welch, 0)}% nem com o maior efeito.</dd>
+          <dt>Onde a vantagem muda de lado</dt>
+          <dd>Só no controle normal, em que os pressupostos do {welch} valem: ele supera o {mw} por até
+          {fmt(100 * normal.max(), 1)} pontos (efeito {fmt(efeito_normal, 2)}),
+          {"uma vantagem pequena, mas acima da margem de erro" if welch_ganha else "dentro da margem de erro"}.
+          Com outliers, o {mw} ainda ganha, mas por no máximo {fmt(-100 * outliers.min(), 1)} pontos.</dd>
+          <dt>E nos dados reais</dt>
+          <dd>O efeito observado nos elegíveis ({fmt(efeito_real, 2)}, linha pontilhada) fica onde as
+          curvas mal saem do chão: com {N_POR_GRUPO} PRs por grupo, o poder é de
+          {fmt(100 * poder_real[mw], 0)}% no {mw} e {fmt(100 * poder_real[welch], 0)}% no {welch}.</dd>
+        </dl>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    def celula_efeito(situacao: str, teste: str) -> str:
+        curva = sim[(sim["situacao"] == situacao) & (sim["teste"] == teste)]
+        efeito = efeito_para_poder(curva, PODER_ALVO)
+        if efeito is None:
+            return f"<span class='txt'>Não chega (máx. {fmt(100 * curva['proporcao'].max(), 0)}%)</span>"
+        return f"{fmt(efeito, 2)} <span class='unit'>× {fmt(np.exp(efeito * calibrar().sigma), 1)}</span>"
+
+    def tabela(titulo: str, celula) -> str:
+        corpo = "".join(
+            f"<tr><th>{s.nome}</th>" + "".join(f"<td>{celula(chave, t)}</td>" for t in (welch, mw)) + "</tr>"
+            for chave, s in SITUACOES.items()
+        )
+        return (
+            f"<div class='table-scroll'><table class='stats-table result-table'><caption>{titulo}</caption>"
+            f"<thead><tr><th>Situação</th><th>{welch}</th><th>{mw}</th></tr></thead><tbody>{corpo}</tbody></table></div>"
+        )
+
+    def celula_poder(situacao: str, teste: str) -> str:
+        linha = curvas.loc[(situacao, teste, EFEITO_EXEMPLO)]
+        return f"{fmt(100 * linha['proporcao'], 1)}% <span class='unit'>± {fmt(100 * linha['margem_erro'], 1)}</span>"
+
+    st.markdown(
+        f"""
+        <div class="tables-pair">
+          {tabela(f"Poder com efeito {fmt(EFEITO_EXEMPLO, 1)} (tempos × {fmt(multiplicador, 1)})", celula_poder)}
+          {tabela(f"Efeito necessário para {fmt(100 * PODER_ALVO, 0)}% de poder", celula_efeito)}
+        </div>
+        <p class="table-note">O efeito é o deslocamento do grupo com bot no log dos tempos, em desvios;
+        o multiplicador ao lado é quantas vezes os tempos crescem. O efeito para {fmt(100 * PODER_ALVO, 0)}%
+        é interpolado entre os {len(efeitos)} efeitos simulados, e a margem é de 95%. Em "Amostra pequena",
+        são {N_PEQUENO} PRs por grupo; nas demais, {N_POR_GRUPO}.</p>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def com_sinal(x: float, casas: int = 2) -> str:
     return f"+{fmt(x, casas)}" if x > 0 else fmt(x, casas)
 
@@ -724,6 +821,7 @@ CONTEUDOS = {
     "dados": conteudo_dados,
     "testes": conteudo_testes,
     "erro-tipo-1": conteudo_erro_tipo_1,
+    "poder": conteudo_poder,
     "dados-reais": conteudo_dados_reais,
 }
 

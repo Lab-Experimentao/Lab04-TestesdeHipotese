@@ -135,6 +135,22 @@ def erro_tipo_1(simulacoes: pd.DataFrame, alpha: float = ALPHA) -> pd.DataFrame:
     return linhas
 
 
+def efeito_para_poder(curva: pd.DataFrame, alvo: float) -> float | None:
+    """Menor efeito em que a curva de poder chega ao alvo, interpolado entre os efeitos simulados.
+
+    curva: linhas de um teste numa situação e num α, com efeito e proporcao. None se não chega.
+    """
+    curva = curva.sort_values("efeito")
+    efeitos, poder = curva["efeito"].to_numpy(), curva["proporcao"].to_numpy()
+    acima = np.flatnonzero(poder >= alvo)
+    if not len(acima):
+        return None
+    i = acima[0]
+    if i == 0:
+        return float(efeitos[0])
+    return float(efeitos[i - 1] + (alvo - poder[i - 1]) * (efeitos[i] - efeitos[i - 1]) / (poder[i] - poder[i - 1]))
+
+
 def main() -> None:
     resultados = salvar_simulacoes()
 

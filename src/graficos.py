@@ -40,6 +40,10 @@ FIM_X_G3 = 8
 DESLOCAMENTO_G3 = {TESTE_PARAMETRICO: -0.16, TESTE_NAO_PARAMETRICO: 0.16}
 SIMBOLOS_G3 = {TESTE_PARAMETRICO: "circle", TESTE_NAO_PARAMETRICO: "diamond"}
 
+# Grade do G4: uma situação por painel; a célula que sobra recebe a legenda
+COLUNAS_G4 = 4
+PODER_ALVO = 0.8
+
 
 def fmt(x: float, casas: int = 1) -> str:
     """Número no formato brasileiro: 1.234,5"""
@@ -519,6 +523,138 @@ def g3_erro_tipo_1(erro: pd.DataFrame, alpha: float) -> go.Figure:
         font={"family": FONTE, "size": 12, "color": COR_SUAVE},
         height=560,
         margin={"l": 210, "r": 24, "t": 56, "b": 88},
+        separators=",.",
+        paper_bgcolor="#ffffff",
+        plot_bgcolor="#ffffff",
+        hoverlabel={"font_family": FONTE},
+    )
+    fig.update_annotations(font_family=FONTE)
+    return fig
+
+
+def g4_poder(simulacoes: pd.DataFrame, alpha: float, efeito_real: float | None = None) -> go.Figure:
+    """Curvas de poder dos dois testes, um painel por situação, com a linha de 80%.
+
+    simulacoes: resultado de carregar_simulacoes. No efeito zero, o ponto é o erro tipo I do G3.
+    efeito_real: deslocamento observado nos dados reais, em módulo, marcado em todos os painéis.
+    """
+    dados = simulacoes[simulacoes["alpha"] == alpha]
+    situacoes = list(SITUACOES)
+    linhas_grade = -(-len(situacoes) // COLUNAS_G4)
+    specs = [
+        [{} if linha * COLUNAS_G4 + coluna < len(situacoes) else None for coluna in range(COLUNAS_G4)]
+        for linha in range(linhas_grade)
+    ]
+    fig = make_subplots(
+        rows=linhas_grade,
+        cols=COLUNAS_G4,
+        specs=specs,
+        shared_yaxes=True,
+        horizontal_spacing=0.035,
+        vertical_spacing=0.16,
+        subplot_titles=[SITUACOES[s].nome for s in situacoes],
+    )
+    efeito_max = dados["efeito"].max()
+
+    for i, situacao in enumerate(situacoes):
+        linha, coluna = divmod(i, COLUNAS_G4)
+        linha, coluna = linha + 1, coluna + 1
+        for teste, cor in CORES_TESTES.items():
+            curva = dados[(dados["situacao"] == situacao) & (dados["teste"] == teste)].sort_values("efeito")
+            fig.add_trace(
+                go.Scatter(
+                    x=curva["efeito"],
+                    y=100 * curva["proporcao"],
+                    mode="lines+markers",
+                    name=teste,
+                    legendgroup=teste,
+                    showlegend=i == 0,
+                    line={"color": cor, "width": 2},
+                    marker={
+                        "color": cor,
+                        "size": 7,
+                        "symbol": SIMBOLOS_G3[teste],
+                        "line": {"color": "#ffffff", "width": 1},
+                    },
+                    customdata=[
+                        (fmt(e, 2), fmt(m, 1), fmt(100 * p, 1), fmt(100 * me, 1))
+                        for e, m, p, me in zip(
+                            curva["efeito"], curva["multiplicador"], curva["proporcao"], curva["margem_erro"]
+                        )
+                    ],
+                    hovertemplate=(
+                        "Efeito %{customdata[0]} (tempos × %{customdata[1]})<br>"
+                        "Poder %{customdata[2]}% ± %{customdata[3]}"
+                        f"<extra>{teste} · {SITUACOES[situacao].nome}</extra>"
+                    ),
+                ),
+                row=linha,
+                col=coluna,
+            )
+        fig.add_hline(
+            y=100 * PODER_ALVO,
+            row=linha,
+            col=coluna,
+            line={"color": COR_REFERENCIA, "width": 1, "dash": "dash"},
+        )
+        if efeito_real is not None:
+            fig.add_vline(
+                x=efeito_real,
+                row=linha,
+                col=coluna,
+                line={"color": COR_SUAVE, "width": 1, "dash": "dot"},
+            )
+
+    # Entradas só de legenda para as linhas de referência
+    fig.add_trace(go.Scatter(
+        x=[None], y=[None], mode="lines", name=f"{fmt(100 * PODER_ALVO, 0)}% de poder",
+        line={"color": COR_REFERENCIA, "width": 1, "dash": "dash"},
+    ))
+    if efeito_real is not None:
+        fig.add_trace(go.Scatter(
+            x=[None], y=[None], mode="lines", name=f"Efeito nos dados reais ({fmt(efeito_real, 2)})",
+            line={"color": COR_SUAVE, "width": 1, "dash": "dot"},
+        ))
+
+    fig.update_xaxes(
+        range=[-0.1, efeito_max + 0.1],
+        dtick=0.5,
+        ticks="outside",
+        tickcolor=COR_GRADE,
+        linecolor=COR_GRADE,
+        showgrid=False,
+        zeroline=False,
+        fixedrange=True,
+    )
+    fig.update_yaxes(
+        range=[0, 105],
+        dtick=20,
+        ticksuffix="%",
+        gridcolor=COR_GRADE,
+        zeroline=False,
+        fixedrange=True,
+    )
+    fig.update_yaxes(title_text="Poder (% de conjuntos com p < α)", col=1)
+    # Título do eixo x em cada painel sem outro abaixo
+    for i in range(len(situacoes)):
+        if i + COLUNAS_G4 >= len(situacoes):
+            linha, coluna = divmod(i, COLUNAS_G4)
+            fig.update_xaxes(title_text="Efeito (desvios no log)", row=linha + 1, col=coluna + 1)
+
+    # Legenda na célula vazia da grade
+    canto_x = fig.get_subplot(1, COLUNAS_G4).xaxis.domain[0]
+    canto_y = fig.get_subplot(linhas_grade, 1).yaxis.domain[1]
+    fig.update_layout(
+        title={
+            "text": f"G4. Poder dos dois testes por tamanho do efeito, em cada situação (α = {fmt(alpha, 2)})",
+            "x": 0,
+            "xanchor": "left",
+            "font": {"size": 16, "color": COR_TEXTO},
+        },
+        legend={"x": canto_x + 0.02, "xanchor": "left", "y": canto_y, "yanchor": "top"},
+        font={"family": FONTE, "size": 12, "color": COR_SUAVE},
+        height=620,
+        margin={"l": 64, "r": 24, "t": 88, "b": 56},
         separators=",.",
         paper_bgcolor="#ffffff",
         plot_bgcolor="#ffffff",
